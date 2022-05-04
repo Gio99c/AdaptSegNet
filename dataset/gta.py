@@ -105,7 +105,7 @@ class GTA(VisionDataset):
         image = np.array(Image.open(image_path), dtype=np.float32)
         label = np.array(Image.open(label_path), dtype=np.float32)
         
-        image = MeanSubtraction(self.mean)(image)
+        #image = MeanSubtraction(self.mean)(image)
         label = Map(self.mapper)(label)
         
         if self.transforms:
@@ -129,10 +129,10 @@ def printImageLabel(image, label):
     plt.show()
 
 if __name__ == "__main__":
-    crop_width = 1024
-    crop_height = 512
+    crop_width = 1280
+    crop_height = 720
     composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
-    data = GTA("./data/GTA5", "images/", "labels/", info_file="info.json")
+    data = GTA("./data/GTA5", "images/", "labels/", info_file="info.json", transforms=composed)
     image, label = data[5]
 
     transforms.ToPILImage()(image.to(torch.uint8)).show()
