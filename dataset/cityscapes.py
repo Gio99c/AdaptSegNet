@@ -128,4 +128,4 @@ if __name__ == "__main__":
     composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
     data = Cityscapes("./data/Cityscapes", "images/", train=True, info_file="info.json", transforms=composed)
     image = data[5]
-    printImageLabel(image)
+    transforms.ToPILImage()(image.to(torch.uint8)).show()
