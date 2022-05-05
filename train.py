@@ -16,13 +16,45 @@ from utils import poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, per_class_iu
 from loss import DiceLoss, flatten
 import torch.cuda.amp as amp
-from torchvision import datasets, transforms
+from torchvision import transforms
 from PIL import Image
-from torchvision.datasets.vision import VisionDataset
 from dataset.cityscapes import Cityscapes
 from dataset.gta import GTA
+from model.discriminator import FCDiscriminator
 
+IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
+BATCH_SIZE = 1
+ITER_SIZE = 1
+NUM_WORKERS = 4
+DATA_SOURCE = './data/GTA5'
+DATA_LIST_PATH_SOURCE = 'train.txt'
+IGNORE_LABEL = 255 #
+INPUT_SIZE_SOURCE = '1280,720'
+DATA_TARGET = './data/Cityscapes/data'
+DATA_LIST_PATH_TARGET = 'train.txt'
+INPUT_SIZE_TARGET = '1024,512'
+LEARNING_RATE = 2.5e-4
+MOMENTUM = 0.9
+NUM_CLASSES = 19
+#NUM_STEPS = 250000
+#NUM_STEPS_STOP = 150000  # early stopping
+POWER = 0.9
+RANDOM_SEED = 1234
+PRETRAINED_MODEL_PATH = 'http://vllab.ucmerced.edu/ytsai/CVPR18/DeepLab_resnet_pretrained_init-f81d91e8.pth'
+#SAVE_NUM_IMAGES = 2
+#SAVE_PRED_EVERY = 5000
+#SNAPSHOT_DIR = './snapshots/'
+WEIGHT_DECAY = 0.0005 # Bisenet : 1e-4
+
+LEARNING_RATE_D = 1e-4
+LAMBDA_SEG = 0.1
+LAMBDA_ADV_TARGET1 = 0.0002
+LAMBDA_ADV_TARGET2 = 0.001
+GAN = 'Vanilla'
+
+TARGET = 'cityscapes'
+SET = 'train'
 
 print("Import terminato")
 
@@ -90,7 +122,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
     step = 0
 
     for epoch in range(args.epoch_start_i, args.num_epochs):
-        lr = poly_lr_scheduler(optimizer, args.learning_rate, iter = epoch, max_iter=args.num_epochs) #set the decay of the learning rate
+        lr = poly_lr_scheduler(optimizer, args.learning_rate, iter = epoch, max_iter=args.num_epochs, power=args.power) #set the decay of the learning rate
         model.train()# set the model to into the train mode
         tq = tqdm(total = len(dataloader_train)*args.batch_size) #progress bar
         tq.set_description('epoch %d, lr %f' % (epoch, lr))
@@ -150,19 +182,23 @@ def main(params):
 
     # basic parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--num_epochs', type=int, default=50, help='Number of epochs to train for')
+    parser.add_argument('--num_epochs', type=int, default=50, help='Number of epochs to train for')                     # -> num_steps 
     parser.add_argument('--tensorboard_logdir', type=str, default='run', help='Directory for the tensorboard writer')
     parser.add_argument('--epoch_start_i', type=int, default=0, help='Start counting epochs from this number')
     parser.add_argument('--checkpoint_step', type=int, default=5, help='How often to save checkpoints (epochs)')
     parser.add_argument('--validation_step', type=int, default=15, help='How often to perform validation (epochs)')
-    parser.add_argument('--dataset', type=str, default="Cityscapes", help='Dataset you are using.')
     parser.add_argument('--crop_height', type=int, default=512, help='Height of cropped/resized input image to network')
     parser.add_argument('--crop_width', type=int, default=1024, help='Width of cropped/resized input image to network')
+    parser.add_argument('--input_size_source', type=str, default=INPUT_SIZE_SOURCE, help='Width of input source image')
+    parser.add_argument('--input_size_target', type=str, default=INPUT_SIZE_TARGET, help='Width of input target image')
     parser.add_argument('--batch_size', type=int, default=2, help='Number of images in each batch')
-    parser.add_argument('--context_path', type=str, default="resnet101",
-                        help='The context path model you are using, resnet18, resnet101.')
+    parser.add_argument('--iter_size', type=int, default=2, help='Accumulate gradients for iter_size iteractions')
+    parser.add_argument('--context_path', type=str, default="resnet101", help='The context path model you are using, resnet18, resnet101.')
     parser.add_argument('--learning_rate', type=float, default=0.01, help='learning rate used for train')
-    parser.add_argument('--data', type=str, default='', help='path of training data')
+    parser.add_argument('--data_source', type=str, default='', help='path of training source data')
+    parser.add_argument('--data_list_path_source', type=str, default='', help='path of training labels of source data')
+    parser.add_argument('--data_target', type=str, default='', help='path of training target data')
+    parser.add_argument('--data_list_path_target', type=str, default='', help='path of training labels of target data')
     parser.add_argument('--num_workers', type=int, default=4, help='num of workers')
     parser.add_argument('--num_classes', type=int, default=32, help='num of object classes (with void)')
     parser.add_argument('--cuda', type=str, default='0', help='GPU ids used for training')
@@ -171,6 +207,11 @@ def main(params):
     parser.add_argument('--save_model_path', type=str, default=None, help='path to save model')
     parser.add_argument('--optimizer', type=str, default='rmsprop', help='optimizer, support rmsprop, sgd, adam')
     parser.add_argument('--loss', type=str, default='crossentropy', help='loss function, dice or crossentropy')
+    parser.add_argument('--power', type=float, default=POWER, help='Power for polynomial learning rate decay')
+    parser.add_argument('--random_seed', type=int, default=RANDOM_SEED, help='Random seed for reproducibility')
+    parser.add_argument('--momentum', type=float, default=MOMENTUM, help='Momentum for SGD')
+    parser.add_argument('--weight_decay', type=float, default=WEIGHT_DECAY, help='Weight decay for SGD')
+
 
     args = parser.parse_args(params)
 
@@ -196,7 +237,7 @@ def main(params):
     if args.optimizer == 'rmsprop':
         optimizer = torch.optim.RMSprop(model.parameters(), args.learning_rate)
     elif args.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), args.learning_rate, momentum=0.9, weight_decay=1e-4)
+        optimizer = torch.optim.SGD(model.parameters(), args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
     elif args.optimizer == 'adam':
         optimizer = torch.optim.Adam(model.parameters(), args.learning_rate)
     else:  # rmsprop
