@@ -25,6 +25,7 @@ from dataset.cityscapes import Cityscapes
 from dataset.gta import GTA
 from model.discriminator import FCDiscriminator
 from torch import nn
+import torch.nn.functional as F
 
 
 #------------------------------------------------------------------------------
@@ -58,7 +59,7 @@ POWER = 0.9
 LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1                #quali lambda servono? 
 LAMBDA_ADV_TARGET1 = 0.0002     #quali lambda servono? 
-LAMBDA_ADV_TARGET2 = 0.001      #quali lambda servono? 
+LAMBDA_ADV_TARGET2 = 0.001      #quali lambda servono? Forse è questo il valore giusto, Tavera mi sembra abbia detto 0.001 come valore standard
 
 PRETRAINED_MODEL_PATH = None
 CONTEXT_PATH = "resnet101"
@@ -129,7 +130,7 @@ def main(params):
     parser.add_argument('--weight_decay', type=float, default=WEIGHT_DECAY, help='Weight decay for SGD')
     parser.add_argument('--momentum', type=float, default=MOMENTUM, help='Momentum for SGD')
     parser.add_argument('--power', type=float, default=POWER, help='Power for polynomial learning rate decay')
-    parser.add_argument("--learning-rate-D", type=float, default=LEARNING_RATE_D, help="Base learning rate for discriminator.")
+    parser.add_argument("--learning_rate_D", type=float, default=LEARNING_RATE_D, help="Base learning rate for discriminator.")
     parser.add_argument("--lambda-seg", type=float, default=LAMBDA_SEG,help="lambda_seg.")
     parser.add_argument("--lambda-adv-target1", type=float, default=LAMBDA_ADV_TARGET1,help="lambda_adv for adversarial training.")
     parser.add_argument("--lambda-adv-target2", type=float, default=LAMBDA_ADV_TARGET2,help="lambda_adv for adversarial training.")
@@ -250,42 +251,114 @@ def main(params):
 #------------------------------------------TRAIN-------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
 def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader):
+    
     scaler = amp.GradScaler() #Serve? 
 
     writer = SummaryWriter(args.tensorboard_logdir, comment=''.format(args.optimizer, args.context_path))
 
-    if args.loss == 'dice': #imposta la loss
-        loss_func = DiceLoss()
-    elif args.loss == 'crossentropy':
-        loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
+    #Set the loss of G
+    loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
+
+    #Set the loss of D
+    bce_loss = torch.nn.BCEWithLogitsLoss()
+
+
+    #Define the labels for adversarial training
+    source_label = 0
+    target_label = 1
     
     max_miou = 0
     step = 0
 
     for epoch in range(args.epoch_start_i, args.num_epochs):
-        lr = poly_lr_scheduler(optimizer, args.learning_rate, iter = epoch, max_iter=args.num_epochs, power=args.power) #set the decay of the learning rate
-        model.train()# set the model to into the train mode
-        tq = tqdm(total = len(dataloader_train)*args.batch_size) #progress bar
+
+        #Set the model to train mode
+        model.train()
+
+        #Adjust the G lr
+        lr = poly_lr_scheduler(optimizer, args.learning_rate, iter = epoch, max_iter=args.num_epochs, power=args.power) 
+
+        #Adjust the D lr
+        lr_D = poly_lr_scheduler(dis_optimizer, args.learning_rate_D, iter = epoch, max_iter=args.num_epochs, power=args.power)
+
+        #-----------------------------------------------------------------------------
+        #Questo serve per tener traccia dello stato del training durante l'allenamento
+        tq = tqdm(total = len(trainloader)*args.batch_size) #progress bar
         tq.set_description('epoch %d, lr %f' % (epoch, lr))
+        #-----------------------------------------------------------------------------
+
         loss_record = [] # array to store the value of the loss across the training
 
-        for i, (data, label) in enumerate(dataloader_train):
-            label = label.long()
+        for i, ((source_images, source_labels), target_images) in enumerate(zip(trainloader, targetloader)):
+            
+            #----------------------------------Train G----------------------------------------------
+
+            #Don't accumulate grads in D
+            for param in discriminator.parameters():
+                param.requires_grad = False
+
+            
+            #Train with source
+            source_labels = label.long()
             if torch.cuda.is_available() and args.use_gpu:
-                data = data.cuda()
-                label = label.cuda()
+                source_images = source_images.cuda()
+                source_labels = label.cuda()
             
             optimizer.zero_grad()
 
             with amp.autocast():
-                output, output_sup1, output_sup2 = model(data) #final_output, output_x16down, output_(x32down*tail)
-                loss1 = loss_func(output, label)        #principal loss
-                loss2 = loss_func(output_sup1, label)   #loss with respect to output_x16down
-                loss3 = loss_func(output_sup2, label)   #loss with respect to output_(x32down*tail)
-                loss = loss1+loss2+loss3 # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
+                output, output_sup1, output_sup2 = model(source_images) #final_output, output_x16down, output_(x32down*tail)
 
+                #Qui andrebbero le interpolazioni
+                output = interp_source(output)
+                output_sup1 = interp_source(output_sup1)
+                output_sup2 = interp_source(output_sup2)
+                #--------------------------------
+
+                loss1 = loss_func(output, source_labels)                #principal loss
+                loss2 = loss_func(output_sup1, source_labels)           #loss with respect to output_x16down
+                loss3 = loss_func(output_sup2, source_labels)           #loss with respect to output_(x32down*tail)
+                loss = loss1+loss2+loss3                                # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
+
+            
+
+
+            #Train with Target
+            if torch.cuda.is_available() and args.use_gpu:
+                target_images = target_images.cuda()
+
+            with amp.autocast():
+                output_target, _, _ = model(source_images)#Al discriminatore va passato solo output
+
+                #Qui andrebbero le interpolazioni
+                output_target = interp_source(output_target)
+                #--------------------------------
+
+                D_out = discriminator(F.softmax(output_target))      
+
+                loss_adv_target = bce_loss(D_out,
+                                       torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda()) #Calcola la loss del D_out 
+                                                                                                        #rispetto ad un tensore di source_label (quindi di 0) delle stesse dimensioni di D_out 
+                                                                                                        #NB source_label != source_labels, source_label = 0 etichetta per con cui D distingue source e target
+                                                                                                        #                                  source_labels = labels del batch di immagini provenienti da GTA      
+
+                loss = args.lambda_adv_target1 * loss_adv_target
+            
             scaler.scale(loss).backward()
+
+            #----------------------------------end G-----------------------------------------------
+
+
+            #----------------------------------Train D----------------------------------------------
+
+            #-----------------------------------TODO------------------------------------------------
+
+            #-----------------------------------end D-----------------------------------------------
+
+
+            #Lo step degli optmizer va alla fine dei due training
             scaler.step(optimizer)
+            #Qua va lo step dell'optimizer del Discriminator
             scaler.update()
 
             tq.update(args.batch_size)
