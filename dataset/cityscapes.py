@@ -1,4 +1,4 @@
-from turtle import color
+#from turtle import color
 import torch
 import numpy as np
 from torchvision import transforms
@@ -58,7 +58,7 @@ class MeanSubtraction:
 
 
 class Cityscapes(VisionDataset):
-    def __init__(self, root, image_folder, train=True, info_file=None, transforms=transforms.ToTensor()):
+    def __init__(self, root, image_folder, list_path,train=True, info_file=None, transforms=transforms.ToTensor()):
         """
         Inputs:
             root: string, path of the root folder where images and labels are stored
@@ -71,7 +71,7 @@ class Cityscapes(VisionDataset):
         """
         super().__init__(root, transforms)
 
-        self.list_path = "train.txt" if train else "val.txt"                              # path to train.txt/val.txt
+        self.list_path = list_path #"train.txt" if train else "val.txt"                              # path to train.txt/val.txt
         info = json.load(open(f"{root}/{info_file}")) 
         self.train = train          
         self.mapper = dict(info["label2train"])
@@ -126,6 +126,6 @@ if __name__ == "__main__":
     crop_width = 1024
     crop_height = 512
     composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
-    data = Cityscapes("./data/Cityscapes", "images/", train=True, info_file="info.json", transforms=composed)
+    data = Cityscapes("./data/Cityscapes", "images/", list_path='train.txt',train=True, info_file="info.json", transforms=composed)
     image = data[5]
     transforms.ToPILImage()(image.to(torch.uint8)).show()

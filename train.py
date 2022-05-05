@@ -1,4 +1,7 @@
+from calendar import EPOCH
+from contextvars import Context
 import sys
+from xml.dom import VALIDATION_ERR
 sys.path.insert(1, "/Users/gio/Documents/GitHub/BiSeNet")
 
 import argparse
@@ -21,95 +24,233 @@ from PIL import Image
 from dataset.cityscapes import Cityscapes
 from dataset.gta import GTA
 from model.discriminator import FCDiscriminator
+from torch import nn
 
+
+#------------------------------------------------------------------------------
+#------------------------ DEFAULT PARAMETERS ----------------------------------
+#------------------------------------------------------------------------------
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
+NUM_EPOCHS = 50
+EPOCH_START_i = 0
 BATCH_SIZE = 1
 ITER_SIZE = 1
 NUM_WORKERS = 4
+
 DATA_SOURCE = './data/GTA5'
 DATA_LIST_PATH_SOURCE = 'train.txt'
-IGNORE_LABEL = 255 #
-INPUT_SIZE_SOURCE = '1280,720'
 DATA_TARGET = './data/Cityscapes/data'
 DATA_LIST_PATH_TARGET = 'train.txt'
-INPUT_SIZE_TARGET = '1024,512'
-LEARNING_RATE = 2.5e-4
-MOMENTUM = 0.9
-NUM_CLASSES = 19
-#NUM_STEPS = 250000
-#NUM_STEPS_STOP = 150000  # early stopping
-POWER = 0.9
-RANDOM_SEED = 1234
-PRETRAINED_MODEL_PATH = 'http://vllab.ucmerced.edu/ytsai/CVPR18/DeepLab_resnet_pretrained_init-f81d91e8.pth'
-#SAVE_NUM_IMAGES = 2
-#SAVE_PRED_EVERY = 5000
-#SNAPSHOT_DIR = './snapshots/'
-WEIGHT_DECAY = 0.0005 # Bisenet : 1e-4
+INFO_FILE_PATH = 'info.json'
 
+INPUT_SIZE_SOURCE = '1280,720'
+INPUT_SIZE_TARGET = '1024,512'
+CROP_WIDTH = '1024'
+CROP_HEIGHT = '512'
+RANDOM_SEED = 1234
+
+NUM_CLASSES = 19
+LEARNING_RATE = 2.5e-4
+WEIGHT_DECAY = 0.0005 # Bisenet : 1e-4
+MOMENTUM = 0.9
+POWER = 0.9
 LEARNING_RATE_D = 1e-4
-LAMBDA_SEG = 0.1
-LAMBDA_ADV_TARGET1 = 0.0002
-LAMBDA_ADV_TARGET2 = 0.001
+LAMBDA_SEG = 0.1                #quali lambda servono? 
+LAMBDA_ADV_TARGET1 = 0.0002     #quali lambda servono? 
+LAMBDA_ADV_TARGET2 = 0.001      #quali lambda servono? 
+
+PRETRAINED_MODEL_PATH = None
+CONTEXT_PATH = "resnet101"
+OPTIMIZER = 'sgd'
+LOSS = 'crossentropy'
+
+TENSORBOARD_LOGDIR = 'run'
+CHECKPOINT_STEP = 5
+VALIDATION_STEP = 15
+SAVE_MODEL_PATH = None
+
+#------------------------------------------------------------------------------------------------------
+#------------------------I seguenti parametri potrebbero non servire-----------------------------------
+#------------------------------------------------------------------------------------------------------
+
+NUM_STEPS = 250000       #An epoch consists of one full cycle through the training data. 
+                         #This is usually many steps. 
+                         #As an example, if you have 2,000 images and use a batch size of 10 an epoch consists of:
+                         #2,000 images / (10 images / step) = 200 steps.
+NUM_STEPS_STOP = 150000  # early stopping
+
+SAVE_NUM_IMAGES = 2
+SAVE_PRED_EVERY = 5000
+SNAPSHOT_DIR = './snapshots/'
+
 GAN = 'Vanilla'
+IGNORE_LABEL = 255 
 
 TARGET = 'cityscapes'
 SET = 'train'
 
 print("Import terminato")
 
+#------------------------------------------------------------------------------------------------------
+#-------------------------------------------MAIN-------------------------------------------------------
+#------------------------------------------------------------------------------------------------------
 
-def val(args, model, dataloader):
 
-    print(f"{'#'*10} VALIDATION {'#' * 10}")
+def main(params):
+    """ Initialization and train launch """
+    print(os.listdir())
 
-    # label_info = get_label_info(csv_path)
+    #-------------------------------Parse th arguments-------------------------------------------------
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num_epochs', type=int, default=NUM_EPOCHS, help='Number of epochs to train for')                     # -> num_steps 
+    parser.add_argument('--epoch_start_i', type=int, default=EPOCH_START_i, help='Start counting epochs from this number')
+    parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Number of images in each batch')
+    parser.add_argument('--iter_size', type=int, default=ITER_SIZE, help='Accumulate gradients for iter_size iteractions')
+    parser.add_argument('--num_workers', type=int, default=NUM_WORKERS, help='num of workers')
+    
 
-    with torch.no_grad():
-        model.eval() #set the model in the evaluation mode
-        precision_record = []
-        hist = np.zeros((args.num_classes, args.num_classes)) #create a square arrey with side num_classes
-        for i, (data, label) in enumerate(tqdm(dataloader)): #get a batch of data and the respective label at each iteration
-            label = label.type(torch.LongTensor) #set the type of the label to long
-            label = label.long()
-            if torch.cuda.is_available() and args.use_gpu:
-                data = data.cuda()
-                label = label.cuda()
+    parser.add_argument('--data_source', type=str, default=DATA_SOURCE, help='path of training source data')
+    parser.add_argument('--data_list_path_source', type=str, default=DATA_LIST_PATH_SOURCE, help='path of training labels of source data')
+    parser.add_argument('--data_target', type=str, default=DATA_TARGET, help='path of training target data')
+    parser.add_argument('--data_list_path_target', type=str, default=DATA_LIST_PATH_TARGET, help='path of training labels of target data')
+    parser.add_argument('--info_file', type=str, default=INFO_FILE_PATH, help='path info file')
 
-            #get RGB predict image
-            predict = model(data).squeeze() #remove all the dimension equal to one => For example, if input is of shape: (A×1×B×C×1×D) then the out tensor will be of shape: (A×B×C×D)
-            predict = reverse_one_hot(predict) #from one_hot_encoding to class key?
-            predict = np.array(predict.cpu()) #move predict to cpu and convert it into a numpy array
 
-            #get RGB label image
-            label = label.squeeze()
-            if args.loss == 'dice':#check what loss is being used
-                label = reverse_one_hot(label)
-            label = np.array(label.cpu())
+    parser.add_argument('--input_size_source', type=str, default=INPUT_SIZE_SOURCE, help='Size of input source image')
+    parser.add_argument('--input_size_target', type=str, default=INPUT_SIZE_TARGET, help='Size of input target image')
+    parser.add_argument('--crop_width', type=int, default=CROP_WIDTH, help='Width of cropped/resized input image to network')
+    parser.add_argument('--crop_height', type=int, default=512, help='Height of cropped/resized input image to network')
+    parser.add_argument('--random_seed', type=int, default=RANDOM_SEED, help='Random seed for reproducibility')
 
-            #compute per pixel accuracy
-            precision = compute_global_accuracy(predict, label) #accuracy of the prediction
-            hist += fast_hist(label.flatten(), predict.flatten(), args.num_classes) #cosa fa ? // Sono invertiti gli argomenti?
-            
-            # there is no need to transform the one-hot array to visual RGB array
-            # predict = colour_code_segmentation(np.array(predict), label_info)
-            # label = colour_code_segmentation(np.array(label), label_info)
-            precision_record.append(precision)
+
+    parser.add_argument('--num_classes', type=int, default=NUM_CLASSES, help='num of object classes (with void)')
+    parser.add_argument('--learning_rate', type=float, default=LEARNING_RATE, help='learning rate used for train')
+    parser.add_argument('--weight_decay', type=float, default=WEIGHT_DECAY, help='Weight decay for SGD')
+    parser.add_argument('--momentum', type=float, default=MOMENTUM, help='Momentum for SGD')
+    parser.add_argument('--power', type=float, default=POWER, help='Power for polynomial learning rate decay')
+    parser.add_argument("--learning-rate-D", type=float, default=LEARNING_RATE_D, help="Base learning rate for discriminator.")
+    parser.add_argument("--lambda-seg", type=float, default=LAMBDA_SEG,help="lambda_seg.")
+    parser.add_argument("--lambda-adv-target1", type=float, default=LAMBDA_ADV_TARGET1,help="lambda_adv for adversarial training.")
+    parser.add_argument("--lambda-adv-target2", type=float, default=LAMBDA_ADV_TARGET2,help="lambda_adv for adversarial training.")
 
     
-    precision = np.mean(precision_record)
-    miou_list = per_class_iu(hist) #come funziona questo metodo?
-    miou = np.mean(miou_list)
+    parser.add_argument('--pretrained_model_path', type=str, default=PRETRAINED_MODEL_PATH, help='path to pretrained model')
+    parser.add_argument('--context_path', type=str, default=CONTEXT_PATH, help='The context path model you are using, resnet18, resnet101.')
+    parser.add_argument('--optimizer', type=str, default=OPTIMIZER, help='optimizer, support rmsprop, sgd, adam')
+    parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
+    
 
-    print('precision per pixel for test: %.3f' % precision)
-    print('mIoU for validation: %.3f' % miou)
-    print(f'mIoU per class: {miou_list}')
+    parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
+    parser.add_argument('--checkpoint_step', type=int, default=CHECKPOINT_STEP, help='How often to save checkpoints (epochs)')
+    parser.add_argument('--validation_step', type=int, default=VALIDATION_STEP, help='How often to perform validation (epochs)')
+    parser.add_argument('--save_model_path', type=str, default=SAVE_MODEL_PATH, help='path to save model')
+    
+    
+    parser.add_argument('--cuda', type=str, default='0', help='GPU ids used for training')
+    parser.add_argument('--use_gpu', type=bool, default=True, help='whether to user gpu for training')
 
-    return precision, miou
+    args = parser.parse_args(params)
+    
+    #-------------------------------------end arguments-----------------------------------------------
+   
+    #------------------------------------Initialization-----------------------------------------------
+
+    #Prepare the source and target sizes
+    w, h = map(int, args.input_size_source.split(','))
+    input_size_source = (w, h)
+
+    w, h = map(int, args.input_size_target.split(','))
+    input_size_target = (w, h)
+
+    #Build the model
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
+    model = BiSeNet(args.num_classes, args.context_path)
+    if torch.cuda.is_available() and args.use_gpu:
+        model = torch.nn.DataParallel(model).cuda()
+
+    #Load pretrained model if exists
+    if args.pretrained_model_path is not None:
+        print('load model from %s ...' % args.pretrained_model_path)
+        model.module.load_state_dict(torch.load(args.pretrained_model_path))
+        print('Done!')
+
+    #Build the Discirminator
+    discriminator = FCDiscriminator(num_classes=args.num_classes)
+    if torch.cuda.is_available() and args.use_gpu:                          #Fare check del corretto funzionamento,
+        discriminator = torch.nn.DataParallel(discriminator).cuda()         #in AdaptSegNet model_D1.cuda(args.gpu), dove args.gpu indica su quale device caricare
 
 
-def train(args, model, optimizer, dataloader_train, dataloader_val):
-    scaler = amp.GradScaler() #Cos'è il GradScaler?
+
+    #Datasets instances 
+    composed = transforms.Compose([transforms.ToTensor(),                                                               
+                                    transforms.RandomHorizontalFlip(p=0.5),                                             
+                                    transforms.RandomAffine(0, scale=[0.75, 2.0]), 
+                                    transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
+
+    GTA5_dataset = GTA(root= args.data_source, 
+                         image_folder= 'images', labels_folder= 'labels',
+                         list_path= args.data_list_path_source,
+                         info_file= args.info_file,
+                         transforms= composed)
+
+    Cityscapes_dataset = Cityscapes(root= args.data_traget,
+                         image_folder= 'images', 
+                         list_path= args.data_list_path_targe,
+                         info_file= args.info_file,
+                         transforms= composed
+    )
+
+    #Dataloader instances
+    trainloader = DataLoader(GTA5_dataset,
+                            batch_size=args.batch_size,
+                            shuffle=True, 
+                            num_workers=args.num_workers,
+                            pin_memory=True)  
+    
+    targetloader =DataLoader(Cityscapes_dataset,
+                            batch_size=args.batch_size,
+                            shuffle=True, 
+                            num_workers=args.num_workers,
+                            pin_memory=True)
+
+        
+
+    #Build Model Optimizer
+    if args.optimizer == 'rmsprop':
+        optimizer = torch.optim.RMSprop(model.parameters(), args.learning_rate)
+    elif args.optimizer == 'sgd':
+        optimizer = torch.optim.SGD(model.parameters(), args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
+    elif args.optimizer == 'adam':
+        optimizer = torch.optim.Adam(model.parameters(), args.learning_rate)
+    else:  # rmsprop
+        print('not supported optimizer \n')
+        return None
+    
+    #Build Discriminator Optimizer
+    dis_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.learning_rate_D, betas=(0.9, 0.99))
+
+    #Interpolation functions
+    interp_source = nn.Upsample(size=(input_size_source[1], input_size_source[0]), mode='bilinear')
+    interp_target = nn.Upsample(size=(input_size_target[1], input_size_target[0]), mode='bilinear')   
+    #------------------------------------end initialization-----------------------------------------------
+
+
+    #--------------------------------------Train Launch---------------------------------------------------
+    train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader)
+
+
+#------------------------------------------------------------------------------------------------------
+#-----------------------------------------END MAIN-----------------------------------------------------
+#------------------------------------------------------------------------------------------------------
+
+
+
+#------------------------------------------------------------------------------------------------------
+#------------------------------------------TRAIN-------------------------------------------------------
+#------------------------------------------------------------------------------------------------------
+def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader):
+    scaler = amp.GradScaler() #Serve? 
 
     writer = SummaryWriter(args.tensorboard_logdir, comment=''.format(args.optimizer, args.context_path))
 
@@ -177,84 +318,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
                 writer.add_scalar('epoch/miou val', miou, epoch)
 
 
-def main(params):
-    print(os.listdir())
 
-    # basic parameters
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--num_epochs', type=int, default=50, help='Number of epochs to train for')                     # -> num_steps 
-    parser.add_argument('--tensorboard_logdir', type=str, default='run', help='Directory for the tensorboard writer')
-    parser.add_argument('--epoch_start_i', type=int, default=0, help='Start counting epochs from this number')
-    parser.add_argument('--checkpoint_step', type=int, default=5, help='How often to save checkpoints (epochs)')
-    parser.add_argument('--validation_step', type=int, default=15, help='How often to perform validation (epochs)')
-    parser.add_argument('--crop_height', type=int, default=512, help='Height of cropped/resized input image to network')
-    parser.add_argument('--crop_width', type=int, default=1024, help='Width of cropped/resized input image to network')
-    parser.add_argument('--input_size_source', type=str, default=INPUT_SIZE_SOURCE, help='Width of input source image')
-    parser.add_argument('--input_size_target', type=str, default=INPUT_SIZE_TARGET, help='Width of input target image')
-    parser.add_argument('--batch_size', type=int, default=2, help='Number of images in each batch')
-    parser.add_argument('--iter_size', type=int, default=2, help='Accumulate gradients for iter_size iteractions')
-    parser.add_argument('--context_path', type=str, default="resnet101", help='The context path model you are using, resnet18, resnet101.')
-    parser.add_argument('--learning_rate', type=float, default=0.01, help='learning rate used for train')
-    parser.add_argument('--data_source', type=str, default='', help='path of training source data')
-    parser.add_argument('--data_list_path_source', type=str, default='', help='path of training labels of source data')
-    parser.add_argument('--data_target', type=str, default='', help='path of training target data')
-    parser.add_argument('--data_list_path_target', type=str, default='', help='path of training labels of target data')
-    parser.add_argument('--num_workers', type=int, default=4, help='num of workers')
-    parser.add_argument('--num_classes', type=int, default=32, help='num of object classes (with void)')
-    parser.add_argument('--cuda', type=str, default='0', help='GPU ids used for training')
-    parser.add_argument('--use_gpu', type=bool, default=True, help='whether to user gpu for training')
-    parser.add_argument('--pretrained_model_path', type=str, default=None, help='path to pretrained model')
-    parser.add_argument('--save_model_path', type=str, default=None, help='path to save model')
-    parser.add_argument('--optimizer', type=str, default='rmsprop', help='optimizer, support rmsprop, sgd, adam')
-    parser.add_argument('--loss', type=str, default='crossentropy', help='loss function, dice or crossentropy')
-    parser.add_argument('--power', type=float, default=POWER, help='Power for polynomial learning rate decay')
-    parser.add_argument('--random_seed', type=int, default=RANDOM_SEED, help='Random seed for reproducibility')
-    parser.add_argument('--momentum', type=float, default=MOMENTUM, help='Momentum for SGD')
-    parser.add_argument('--weight_decay', type=float, default=WEIGHT_DECAY, help='Weight decay for SGD')
-
-
-    args = parser.parse_args(params)
-
-
-    # Create HERE datasets instance
-    composed = transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
-    dataset_train = Cityscapes(args.data, "images", "labels", train=True, info_file="info.json", transforms=composed)
-
-    dataset_val = Cityscapes(args.data, "images", "labels", train=False, info_file="info.json", transforms=composed)
-
-    # Define HERE your dataloaders:
-    dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    dataloader_val = DataLoader(dataset_val, batch_size=1, shuffle=True, num_workers=args.num_workers)
-
-
-    # build model
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
-    model = BiSeNet(args.num_classes, args.context_path)
-    if torch.cuda.is_available() and args.use_gpu:
-        model = torch.nn.DataParallel(model).cuda()
-
-    # build optimizer
-    if args.optimizer == 'rmsprop':
-        optimizer = torch.optim.RMSprop(model.parameters(), args.learning_rate)
-    elif args.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
-    elif args.optimizer == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), args.learning_rate)
-    else:  # rmsprop
-        print('not supported optimizer \n')
-        return None
-
-    # load pretrained model if exists
-    if args.pretrained_model_path is not None:
-        print('load model from %s ...' % args.pretrained_model_path)
-        model.module.load_state_dict(torch.load(args.pretrained_model_path))
-        print('Done!')
-
-
-    # train
-    train(args, model, optimizer, dataloader_train, dataloader_val)
-    # final test
-    val(args, model, dataloader_val)
     
 
 

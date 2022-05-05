@@ -58,7 +58,7 @@ class MeanSubtraction:
 
 
 class GTA(VisionDataset):
-    def __init__(self, root, image_folder, labels_folder, info_file=None, transforms=transforms.ToTensor()):
+    def __init__(self, root, image_folder, labels_folder, list_path,info_file=None, transforms=transforms.ToTensor()):
         """
         Inputs:
             root: string, path of the root folder where images and labels are stored
@@ -72,7 +72,7 @@ class GTA(VisionDataset):
         """
         super().__init__(root, transforms)
 
-        self.list_path = "train.txt"
+        self.list_path = list_path
         info = json.load(open(f"{root}/{info_file}"))         
         self.mapper = dict(info["label2train"])
         self.mean = info["mean"]
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     crop_width = 1280
     crop_height = 720
     composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
-    data = GTA("./data/GTA5", "images/", "labels/", info_file="info.json", transforms=composed)
+    data = GTA("./data/GTA5", "images/", "labels/", 'train.txt',info_file="info.json", transforms=composed)
     image, label = data[5]
 
     transforms.ToPILImage()(image.to(torch.uint8)).show()
