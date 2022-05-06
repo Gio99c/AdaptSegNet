@@ -58,7 +58,7 @@ MOMENTUM = 0.9
 POWER = 0.9
 LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1                #quali lambda servono? 
-LAMBDA_ADV_TARGET1 = 0.0002     #quali lambda servono? 
+LAMBDA_ADV_TARGET1 = 0.001      #prima era 0.0002 quali lambda servono? 
 LAMBDA_ADV_TARGET2 = 0.001      #quali lambda servono? Forse è questo il valore giusto, Tavera mi sembra abbia detto 0.001 come valore standard
 
 PRETRAINED_MODEL_PATH = None
@@ -180,6 +180,7 @@ def main(params):
     discriminator = FCDiscriminator(num_classes=args.num_classes)
     if torch.cuda.is_available() and args.use_gpu:                          #Fare check del corretto funzionamento,
         discriminator = torch.nn.DataParallel(discriminator).cuda()         #in AdaptSegNet model_D1.cuda(args.gpu), dove args.gpu indica su quale device caricare
+                                                                            # @Edoardo, dovrebbe essere uguale
 
 
 
@@ -195,9 +196,18 @@ def main(params):
                          info_file= args.info_file,
                          transforms= composed)
 
-    Cityscapes_dataset = Cityscapes(root= args.data_traget,
-                         image_folder= 'images', 
-                         list_path= args.data_list_path_targe,
+    Cityscapes_dataset_train = Cityscapes(root= args.data_target,
+                         image_folder= 'images',
+                         labels_folder='labels',
+                         train=True,
+                         info_file= args.info_file,
+                         transforms= composed
+    )
+
+    Cityscapes_dataset_val = Cityscapes(root= args.data_target,
+                         image_folder= 'images',
+                         labels_folder='labels',
+                         train=False,
                          info_file= args.info_file,
                          transforms= composed
     )
@@ -209,8 +219,14 @@ def main(params):
                             num_workers=args.num_workers,
                             pin_memory=True)  
     
-    targetloader =DataLoader(Cityscapes_dataset,
+    targetloader = DataLoader(Cityscapes_dataset_train,
                             batch_size=args.batch_size,
+                            shuffle=True, 
+                            num_workers=args.num_workers,
+                            pin_memory=True)
+    
+    valloader = DataLoader(Cityscapes_dataset_val,
+                            batch_size=1,
                             shuffle=True, 
                             num_workers=args.num_workers,
                             pin_memory=True)
@@ -238,7 +254,9 @@ def main(params):
 
 
     #--------------------------------------Train Launch---------------------------------------------------
-    train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader)
+    train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader)
+
+    val(args, model, valloader)
 
 
 #------------------------------------------------------------------------------------------------------
@@ -250,9 +268,10 @@ def main(params):
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------TRAIN-------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
-def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader):
+def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader):
     
-    scaler = amp.GradScaler() #Serve? 
+    scaler = amp.GradScaler() #Serve?
+    scaler_dis = amp.GradScaler()
 
     writer = SummaryWriter(args.tensorboard_logdir, comment=''.format(args.optimizer, args.context_path))
 
@@ -289,7 +308,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
 
         loss_record = [] # array to store the value of the loss across the training
 
-        for i, ((source_images, source_labels), target_images) in enumerate(zip(trainloader, targetloader)):
+        for i, ((source_images, source_labels), (target_images, _)) in enumerate(zip(trainloader, targetloader)):
             
             #----------------------------------Train G----------------------------------------------
 
@@ -306,6 +325,8 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             
             optimizer.zero_grad()
 
+            dis_optimizer.zero_grad() 
+
             with amp.autocast():
                 output, output_sup1, output_sup2 = model(source_images) #final_output, output_x16down, output_(x32down*tail)
 
@@ -320,7 +341,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 loss3 = loss_func(output_sup2, source_labels)           #loss with respect to output_(x32down*tail)
                 loss = loss1+loss2+loss3                                # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
 
-            
+            scaler.scale(loss).backward() # @Edoardo, penso che questo si debba fare anche qui
 
 
             #Train with Target
@@ -328,10 +349,12 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 target_images = target_images.cuda()
 
             with amp.autocast():
-                output_target, _, _ = model(source_images)#Al discriminatore va passato solo output
+                #output_target, _, _ = model(source_images) #Al discriminatore va passato solo output - @Edoardo, ho commentato questa linea, penso volessi passare a model target_images.
+                output_target, _, _ = model(target_images) #Al discriminatore va passato solo output
 
                 #Qui andrebbero le interpolazioni
-                output_target = interp_source(output_target)
+                #output_target = interp_source(output_target) # @Edoardo, stessa cosa qui
+                output_target = interp_target(output_target)
                 #--------------------------------
 
                 D_out = discriminator(F.softmax(output_target))      
@@ -342,24 +365,48 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                                                                                                         #NB source_label != source_labels, source_label = 0 etichetta per con cui D distingue source e target
                                                                                                         #                                  source_labels = labels del batch di immagini provenienti da GTA      
 
-                loss = args.lambda_adv_target1 * loss_adv_target
+                loss = args.lambda_adv_target1 * loss_adv_target # @Edoardo, in questo modo la loss= loss1+loss2+loss3 viene sovrascritta, dobbiamo capire cosa fare qui
             
-            scaler.scale(loss).backward()
+            scaler_dis.scale(loss).backward()
 
             #----------------------------------end G-----------------------------------------------
 
 
             #----------------------------------Train D----------------------------------------------
 
-            #-----------------------------------TODO------------------------------------------------
+            # bring back requires_grad
+            for param in discriminator.parameters():
+                param.requires_grad = True
+
+            # train with source
+            output = output.detach()
+
+            with amp.autocast():
+                D_out = discriminator(F.softmax(output))
+
+                loss_D = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda())
+
+            scaler_dis.scale(loss_D).backward()
+
+
+            # train with target
+            output_target = output_target.detach()
+
+            with amp.autocast():
+                D_out = discriminator(F.softmax(output_target))
+
+                loss_D = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(target_label).cuda())
+
+            scaler_dis.scale(loss_D).backward()
 
             #-----------------------------------end D-----------------------------------------------
 
-
             #Lo step degli optmizer va alla fine dei due training
             scaler.step(optimizer)
+            scaler_dis.step(dis_optimizer)
             #Qua va lo step dell'optimizer del Discriminator
             scaler.update()
+            scaler_dis.update()
 
             tq.update(args.batch_size)
             tq.set_postfix(loss='%.6f' % loss)
@@ -380,7 +427,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                         os.path.join(args.save_model_path, 'latest_dice_loss.pth'))
         
         if epoch % args.validation_step == 0 and epoch != 0:
-                precision, miou = val(args, model, dataloader_val)
+                precision, miou = val(args, model, valloader)
                 if miou > max_miou:
                     max_miou = miou
                     import os 
@@ -391,7 +438,53 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 writer.add_scalar('epoch/miou val', miou, epoch)
 
 
+def val(args, model, dataloader):
 
+    print(f"{'#'*10} VALIDATION {'#' * 10}")
+
+    # label_info = get_label_info(csv_path)
+
+    with torch.no_grad():
+        model.eval() #set the model in the evaluation mode
+        precision_record = []
+        hist = np.zeros((args.num_classes, args.num_classes)) #create a square arrey with side num_classes
+        for i, (data, label) in enumerate(tqdm(dataloader)): #get a batch of data and the respective label at each iteration
+            label = label.type(torch.LongTensor) #set the type of the label to long
+            label = label.long()
+            if torch.cuda.is_available() and args.use_gpu:
+                data = data.cuda()
+                label = label.cuda()
+
+            #get RGB predict image
+            predict = model(data).squeeze() #remove all the dimension equal to one => For example, if input is of shape: (A×1×B×C×1×D) then the out tensor will be of shape: (A×B×C×D)
+            predict = reverse_one_hot(predict) #from one_hot_encoding to class key?
+            predict = np.array(predict.cpu()) #move predict to cpu and convert it into a numpy array
+
+            #get RGB label image
+            label = label.squeeze()
+            if args.loss == 'dice':#check what loss is being used
+                label = reverse_one_hot(label)
+            label = np.array(label.cpu())
+
+            #compute per pixel accuracy
+            precision = compute_global_accuracy(predict, label) #accuracy of the prediction
+            hist += fast_hist(label.flatten(), predict.flatten(), args.num_classes) #cosa fa ? // Sono invertiti gli argomenti?
+            
+            # there is no need to transform the one-hot array to visual RGB array
+            # predict = colour_code_segmentation(np.array(predict), label_info)
+            # label = colour_code_segmentation(np.array(label), label_info)
+            precision_record.append(precision)
+
+    
+    precision = np.mean(precision_record)
+    miou_list = per_class_iu(hist) #come funziona questo metodo?
+    miou = np.mean(miou_list)
+
+    print('precision per pixel for test: %.3f' % precision)
+    print('mIoU for validation: %.3f' % miou)
+    print(f'mIoU per class: {miou_list}')
+
+    return precision, miou
     
 
 
@@ -402,7 +495,8 @@ if __name__ == '__main__':
         '--validation_step', '7',
         '--num_epochs', '50',
         '--learning_rate', '2.5e-2',
-        '--data', './data/Cityscapes',
+        '--data_target', './data/Cityscapes',
+        '--data_source', './data/GTA5',
         '--num_workers', '8',
         '--num_classes', '19',
         '--cuda', '0',
