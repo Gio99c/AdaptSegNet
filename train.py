@@ -318,10 +318,10 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
 
             
             #Train with source
-            source_labels = label.long()
+            source_labels = source_labels.long()
             if torch.cuda.is_available() and args.use_gpu:
                 source_images = source_images.cuda()
-                source_labels = label.cuda()
+                source_labels = source_labels.cuda()
             
             optimizer.zero_grad()
 
@@ -330,10 +330,10 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             with amp.autocast():
                 output, output_sup1, output_sup2 = model(source_images) #final_output, output_x16down, output_(x32down*tail)
 
-                #Qui andrebbero le interpolazioni
-                output = interp_source(output)
-                output_sup1 = interp_source(output_sup1)
-                output_sup2 = interp_source(output_sup2)
+                #Qui andrebbero le interpolazioni - al momento comemmentati
+                #output = interp_source(output)
+                #output_sup1 = interp_source(output_sup1)
+                #output_sup2 = interp_source(output_sup2)
                 #--------------------------------
 
                 loss1 = loss_func(output, source_labels)                #principal loss
@@ -352,9 +352,9 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 #output_target, _, _ = model(source_images) #Al discriminatore va passato solo output - @Edoardo, ho commentato questa linea, penso volessi passare a model target_images.
                 output_target, _, _ = model(target_images) #Al discriminatore va passato solo output
 
-                #Qui andrebbero le interpolazioni
-                #output_target = interp_source(output_target) # @Edoardo, stessa cosa qui
-                output_target = interp_target(output_target)
+                #Qui andrebbero le interpolazioni - al momento comemmentati
+                ##output_target = interp_source(output_target) # @Edoardo, stessa cosa qui
+                #output_target = interp_target(output_target)
                 #--------------------------------
 
                 D_out = discriminator(F.softmax(output_target))      
