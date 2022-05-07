@@ -339,9 +339,9 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 loss1 = loss_func(output, source_labels)                #principal loss
                 loss2 = loss_func(output_sup1, source_labels)           #loss with respect to output_x16down
                 loss3 = loss_func(output_sup2, source_labels)           #loss with respect to output_(x32down*tail)
-                loss = loss1+loss2+loss3                                # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
+                loss_seg = loss1+loss2+loss3                                # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
 
-            scaler.scale(loss).backward() # @Edoardo, penso che questo si debba fare anche qui
+            scaler.scale(loss_seg).backward() # @Edoardo, penso che questo si debba fare anche qui
 
 
             #Train with Target
@@ -365,9 +365,9 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                                                                                                         #NB source_label != source_labels, source_label = 0 etichetta per con cui D distingue source e target
                                                                                                         #                                  source_labels = labels del batch di immagini provenienti da GTA      
 
-                loss = args.lambda_adv_target1 * loss_adv_target # @Edoardo, in questo modo la loss= loss1+loss2+loss3 viene sovrascritta, dobbiamo capire cosa fare qui
+                loss_adv = args.lambda_adv_target1 * loss_adv_target # @Edoardo, in questo modo la loss= loss1+loss2+loss3 viene sovrascritta, dobbiamo capire cosa fare qui
             
-            scaler_dis.scale(loss).backward()
+            scaler_dis.scale(loss_adv).backward()
 
             #----------------------------------end G-----------------------------------------------
 
@@ -409,10 +409,12 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             scaler_dis.update()
 
             tq.update(args.batch_size)
-            tq.set_postfix(loss='%.6f' % loss)
+            tq.set_postfix(loss_seg='%.6f' % loss_seg)
+            tq.set_postfix(loss_adv='%.6f' % loss_adv)
+            tq.set_postfix(loss_D='%.6f' % loss_D)
             step += 1
-            writer.add_scalar('loss_step', loss, step)
-            loss_record.append(loss.item())
+            writer.add_scalar('loss_seg_step', loss_seg, step)
+            loss_record.append(loss_seg.item())
 
     
         tq.close()
