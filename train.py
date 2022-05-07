@@ -409,9 +409,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             scaler_dis.update()
 
             tq.update(args.batch_size)
-            tq.set_postfix(loss_seg='%.6f' % loss_seg)
-            tq.set_postfix(loss_adv='%.6f' % loss_adv)
-            tq.set_postfix(loss_D='%.6f' % loss_D)
+            tq.set_postfix({"loss_seg" : f'{loss_seg:.6f}', "loss_adv" : f'{loss_adv:.6f}', "loss_D" : f'{loss_D:.6f}'})
             step += 1
             writer.add_scalar('loss_seg_step', loss_seg, step)
             loss_record.append(loss_seg.item())
