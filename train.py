@@ -306,7 +306,9 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         tq.set_description('epoch %d, lr %f' % (epoch, lr))
         #-----------------------------------------------------------------------------
 
-        loss_record = [] # array to store the value of the loss across the training
+        loss_seg_record = [] # array to store the value of the loss across the training
+        loss_adv_record = []
+        loss_D_record = []
 
         for i, ((source_images, source_labels), (target_images, _)) in enumerate(zip(trainloader, targetloader)):
             
@@ -412,13 +414,27 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             tq.set_postfix({"loss_seg" : f'{loss_seg:.6f}', "loss_adv" : f'{loss_adv:.6f}', "loss_D" : f'{loss_D:.6f}'})
             step += 1
             writer.add_scalar('loss_seg_step', loss_seg, step)
-            loss_record.append(loss_seg.item())
+            writer.add_scalar('loss_adv_step', loss_adv, step)
+            writer.add_scalar('loss_D_step', loss_D, step)
+            loss_seg_record.append(loss_seg.item())
+            loss_adv_record.append(loss_adv.item())
+            loss_D_record.append(loss_D.item())
 
     
         tq.close()
-        loss_train_mean = np.mean(loss_record)
-        writer.add_scalar('epoch/loss_epoch_train', float(loss_train_mean), epoch)
-        print('loss for train : %f' % (loss_train_mean))
+        #Loss_seg
+        loss_train_seg_mean = np.mean(loss_seg_record)
+        writer.add_scalar('epoch/loss_epoch_train_seg', float(loss_train_seg_mean), epoch)
+        print('loss for train : %f' % (loss_train_seg_mean))
+        #Loss_adv
+        loss_train_adv_mean = np.mean(loss_adv_record)
+        writer.add_scalar('epoch/loss_epoch_train_adv', float(loss_train_adv_mean), epoch)
+        print('loss for train : %f' % (loss_train_adv_mean))
+        #Loss_D
+        loss_train_D_mean = np.mean(loss_D_record)
+        writer.add_scalar('epoch/loss_epoch_train_D', float(loss_train_D_mean), epoch)
+        print('loss for train : %f' % (loss_train_D_mean))
+        
         if epoch % args.checkpoint_step == 0 and epoch != 0:
             import os
             if not os.path.isdir(args.save_model_path):
