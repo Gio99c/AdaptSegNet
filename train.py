@@ -270,7 +270,7 @@ def main(params):
 #------------------------------------------------------------------------------------------------------
 def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader):
     
-    scaler = amp.GradScaler() #Serve?
+    scaler = amp.GradScaler() 
     scaler_dis = amp.GradScaler()
 
     writer = SummaryWriter(args.tensorboard_logdir, comment=''.format(args.optimizer, args.context_path))
@@ -374,7 +374,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             #----------------------------------end G-----------------------------------------------
 
 
-            #----------------------------------Train D----------------------------------------------
+            #----------------------------------Train D---------------------------------------------- 
 
             # bring back requires_grad
             for param in discriminator.parameters():
@@ -386,9 +386,9 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             with amp.autocast():
                 D_out = discriminator(F.softmax(output))
 
-                loss_D = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda())
+                loss_D_source = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda())
 
-            scaler_dis.scale(loss_D).backward()
+            #scaler_dis.scale(loss_D).backward()
 
 
             # train with target
@@ -397,9 +397,11 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             with amp.autocast():
                 D_out = discriminator(F.softmax(output_target))
 
-                loss_D = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(target_label).cuda())
+                loss_D_traget = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(target_label).cuda())
 
-            scaler_dis.scale(loss_D).backward()
+            #scaler_dis.scale().backward()
+            loss_D = loss_D_source*0.5 + loss_D_traget*0.5
+            scaler_dis.scale(loss_D).backward() # Nuova backward
 
             #-----------------------------------end D-----------------------------------------------
 
@@ -434,7 +436,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         loss_train_D_mean = np.mean(loss_D_record)
         writer.add_scalar('epoch/loss_epoch_train_D', float(loss_train_D_mean), epoch)
         print('loss for train : %f' % (loss_train_D_mean))
-        
+
         if epoch % args.checkpoint_step == 0 and epoch != 0:
             import os
             if not os.path.isdir(args.save_model_path):
