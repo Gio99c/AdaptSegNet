@@ -3,3 +3,6 @@
 data
 *.local
 *.pyc
+*.lan
+*.pyc
+model/__pycache__/build_BiSeNet.cpython-38.pyc

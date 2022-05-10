@@ -26,6 +26,8 @@ from dataset.gta import GTA
 from model.discriminator import FCDiscriminator
 from torch import nn
 import torch.nn.functional as F
+from fvcore.nn import FlopCountAnalysis
+from fvcore.nn.parameter_count import parameter_count
 
 
 #------------------------------------------------------------------------------
@@ -59,12 +61,12 @@ POWER = 0.9
 LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1                #quali lambda servono? 
 LAMBDA_ADV_TARGET1 = 0.001      #prima era 0.0002 quali lambda servono? 
-LAMBDA_ADV_TARGET2 = 0.001      #quali lambda servono? Forse è questo il valore giusto, Tavera mi sembra abbia detto 0.001 come valore standard
 
 PRETRAINED_MODEL_PATH = None
 CONTEXT_PATH = "resnet101"
 OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
+FLOPS = False
 
 TENSORBOARD_LOGDIR = 'run'
 CHECKPOINT_STEP = 5
@@ -133,13 +135,13 @@ def main(params):
     parser.add_argument("--learning_rate_D", type=float, default=LEARNING_RATE_D, help="Base learning rate for discriminator.")
     parser.add_argument("--lambda-seg", type=float, default=LAMBDA_SEG,help="lambda_seg.")
     parser.add_argument("--lambda-adv-target1", type=float, default=LAMBDA_ADV_TARGET1,help="lambda_adv for adversarial training.")
-    parser.add_argument("--lambda-adv-target2", type=float, default=LAMBDA_ADV_TARGET2,help="lambda_adv for adversarial training.")
 
     
     parser.add_argument('--pretrained_model_path', type=str, default=PRETRAINED_MODEL_PATH, help='path to pretrained model')
     parser.add_argument('--context_path', type=str, default=CONTEXT_PATH, help='The context path model you are using, resnet18, resnet101.')
     parser.add_argument('--optimizer', type=str, default=OPTIMIZER, help='optimizer, support rmsprop, sgd, adam')
     parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
+    parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of paramter and the number of flops')
     
 
     parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
@@ -181,8 +183,10 @@ def main(params):
     if torch.cuda.is_available() and args.use_gpu:                          #Fare check del corretto funzionamento,
         discriminator = torch.nn.DataParallel(discriminator).cuda()         #in AdaptSegNet model_D1.cuda(args.gpu), dove args.gpu indica su quale device caricare
                                                                             # @Edoardo, dovrebbe essere uguale
-
-
+    
+    if args.flops:
+        parameter_flops_count()
+    
 
     #Datasets instances 
     composed = transforms.Compose([transforms.ToTensor(),                                                               
@@ -504,6 +508,21 @@ def val(args, model, dataloader):
 
     return precision, miou
     
+def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)):
+
+    flops_model = FlopCountAnalysis(model, input)
+    flops_dis = FlopCountAnalysis(discriminator, F.softmax(model(input)[0]))
+
+    parameter_model = sum(parameter_count(model).values())
+    parameter_dis = sum(parameter_count(discriminator).values())
+
+
+    print("*" * 20)
+    print(f"Total number of operations: {round((flops_model.total() + flops_dis.total()) / 1e+12, 2)}T FLOPS")
+    print(parameter_model)
+    print(f"Total number of parameters: {parameter_model + parameter_dis}")
+    print("*" * 20)
+    return (flops_model + flops_dis, parameter_model + parameter_dis)
 
 
 if __name__ == '__main__':
