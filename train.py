@@ -295,8 +295,8 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
     scaler_dis = amp.GradScaler()
 
     time = datetime.datetime.now()
-    time = f"{time.year}-{time.month}-{time.day}_{time.hour}.{time.minute}"
-    writer = SummaryWriter(f"{args.tensorboard_logdir}{time}_{args.context_path}_{args.batch_size}_{args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})")
+    time = f"{time.month:2d}-{time.day:2d}_{time.hour:2d}.{time.minute:2d}"
+    writer = SummaryWriter(f"{args.tensorboard_logdir}{time}_{args.context_path}_batch={args.batch_size}_lr={args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})")
 
     #Set the loss of G
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
@@ -542,7 +542,7 @@ def val(args, model, dataloader):
                 axs[2].imshow(label)
                 axs[2].axis('off')
                 ##save the final result
-                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSetNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
+                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSegNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
                 
 
     
@@ -577,14 +577,14 @@ if __name__ == '__main__':
         '--validation_step', '7',
         '--num_epochs', '50',
         '--learning_rate', '2.5e-2',
-        '--data_target', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/data/Cityscapes',
-        '--data_source', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/data/GTA5',
+        '--data_target', '/content/drive/MyDrive/MLDL_Project/AdaptSegNet/data/Cityscapes',
+        '--data_source', '/content/drive/MyDrive/MLDL_Project/AdaptSegNet/data/GTA5',
         '--num_workers', '8',
         '--num_classes', '19',
         '--cuda', '0',
         '--batch_size', '6',
-        '--save_model_path', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/models/',
-        '--tensorboard_logdir', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/runs/',
+        '--save_model_path', '/content/drive/MyDrive/MLDL_Project/AdaptSegNet/models/',
+        '--tensorboard_logdir', '/content/drive/MyDrive/MLDL_Project/AdaptSegNet/runs/',
         '--context_path', 'resnet101',  # set resnet18 or resnet101, only support resnet18 and resnet101
         '--optimizer', 'sgd',
 
