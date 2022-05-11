@@ -70,7 +70,7 @@ PRETRAINED_MODEL_PATH = None
 CONTEXT_PATH = "resnet101"
 OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
-FLOPS = True
+FLOPS = False
 LIGHT = True
 
 TENSORBOARD_LOGDIR = 'run'
