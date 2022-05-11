@@ -50,8 +50,8 @@ DATA_TARGET = './data/Cityscapes/data'
 DATA_LIST_PATH_TARGET = 'train.txt'
 INFO_FILE_PATH = 'info.json'
 
-INPUT_SIZE_SOURCE = '1280,720'
-INPUT_SIZE_TARGET = '1024,512'
+INPUT_SIZE_SOURCE = '720,1280'
+INPUT_SIZE_TARGET = '512,1024'
 CROP_WIDTH = '1024'
 CROP_HEIGHT = '512'
 RANDOM_SEED = 1234
@@ -175,11 +175,11 @@ def main(params):
     #------------------------------------Initialization-----------------------------------------------
 
     #Prepare the source and target sizes
-    w, h = map(int, args.input_size_source.split(','))
-    input_size_source = (w, h)
+    h, w = map(int, args.input_size_source.split(','))
+    input_size_source = (h, w)
 
-    w, h = map(int, args.input_size_target.split(','))
-    input_size_target = (w, h)
+    h, w = map(int, args.input_size_target.split(','))
+    input_size_target = (h, w)
 
     #Build the model
     os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
@@ -204,23 +204,28 @@ def main(params):
     
 
     #Datasets instances 
-    composed = transforms.Compose([transforms.ToTensor(),                                                               
+    composed_source = transforms.Compose([transforms.ToTensor(),                                                               
                                     transforms.RandomHorizontalFlip(p=0.5),                                             
                                     transforms.RandomAffine(0, scale=[0.75, 2.0]), 
-                                    transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
+                                    transforms.RandomCrop(input_size_source, pad_if_needed=True)])
+
+    composed_target = transforms.Compose([transforms.ToTensor(),                                                               
+                                transforms.RandomHorizontalFlip(p=0.5),                                             
+                                transforms.RandomAffine(0, scale=[0.75, 2.0]), 
+                                transforms.RandomCrop(input_size_target, pad_if_needed=True)])
 
     GTA5_dataset = GTA(root= args.data_source, 
                          image_folder= 'images', labels_folder= 'labels',
                          list_path= args.data_list_path_source,
                          info_file= args.info_file,
-                         transforms= composed)
+                         transforms= composed_source)
 
     Cityscapes_dataset_train = Cityscapes(root= args.data_target,
                          image_folder= 'images',
                          labels_folder='labels',
                          train=True,
                          info_file= args.info_file,
-                         transforms= composed
+                         transforms= composed_target
     )
 
     Cityscapes_dataset_val = Cityscapes(root= args.data_target,
@@ -228,7 +233,7 @@ def main(params):
                          labels_folder='labels',
                          train=False,
                          info_file= args.info_file,
-                         transforms= composed
+                         transforms= composed_target
     )
 
     #Dataloader instances
@@ -267,8 +272,8 @@ def main(params):
     dis_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.learning_rate_D, betas=(0.9, 0.99))
 
     #Interpolation functions
-    interp_source = nn.Upsample(size=(input_size_source[1], input_size_source[0]), mode='bilinear')
-    interp_target = nn.Upsample(size=(input_size_target[1], input_size_target[0]), mode='bilinear')   
+    interp_source = nn.Upsample(size=(input_size_source[0], input_size_source[1]), mode='bilinear')
+    interp_target = nn.Upsample(size=(input_size_target[0], input_size_target[1]), mode='bilinear')   
     #------------------------------------end initialization-----------------------------------------------
 
 
