@@ -4,7 +4,7 @@ import json
 import sys
 from turtle import color
 from xml.dom import VALIDATION_ERR
-sys.path.insert(1, "/Users/gio/Documents/GitHub/BiSeNet")
+sys.path.insert(1, "./")
 
 import argparse
 from cProfile import label
@@ -25,10 +25,12 @@ from torchvision import transforms
 from PIL import Image
 from dataset.cityscapes import Cityscapes
 from dataset.gta import GTA
-from model.discriminator import FCDiscriminator
+from model.discriminator import FCDiscriminator, LightDiscriminator
 from torch import nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from fvcore.nn import FlopCountAnalysis
+from fvcore.nn.parameter_count import parameter_count
 
 
 #------------------------------------------------------------------------------
@@ -62,12 +64,13 @@ POWER = 0.9
 LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1                #quali lambda servono? 
 LAMBDA_ADV_TARGET1 = 0.001      #prima era 0.0002 quali lambda servono? 
-LAMBDA_ADV_TARGET2 = 0.001      #quali lambda servono? Forse è questo il valore giusto, Tavera mi sembra abbia detto 0.001 come valore standard
 
 PRETRAINED_MODEL_PATH = None
 CONTEXT_PATH = "resnet101"
 OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
+FLOPS = True
+LIGHT = True
 
 TENSORBOARD_LOGDIR = 'run'
 CHECKPOINT_STEP = 5
@@ -131,14 +134,15 @@ def get_arguments(params):
     parser.add_argument("--learning_rate_D", type=float, default=LEARNING_RATE_D, help="Base learning rate for discriminator.")
     parser.add_argument("--lambda-seg", type=float, default=LAMBDA_SEG,help="lambda_seg.")
     parser.add_argument("--lambda-adv-target1", type=float, default=LAMBDA_ADV_TARGET1,help="lambda_adv for adversarial training.")
-    parser.add_argument("--lambda-adv-target2", type=float, default=LAMBDA_ADV_TARGET2,help="lambda_adv for adversarial training.")
 
     
     parser.add_argument('--pretrained_model_path', type=str, default=PRETRAINED_MODEL_PATH, help='path to pretrained model')
     parser.add_argument('--context_path', type=str, default=CONTEXT_PATH, help='The context path model you are using, resnet18, resnet101.')
     parser.add_argument('--optimizer', type=str, default=OPTIMIZER, help='optimizer, support rmsprop, sgd, adam')
     parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
-    
+    parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of paramter and the number of flops')
+    parser.add_argument('--light', type=bool, default=LIGHT, help='Perform the training with the lightweight discriminator')
+
 
     parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
     parser.add_argument('--checkpoint_step', type=int, default=CHECKPOINT_STEP, help='How often to save checkpoints (epochs)')
@@ -190,12 +194,14 @@ def main(params):
         print('Done!')
 
     #Build the Discirminator
-    discriminator = FCDiscriminator(num_classes=args.num_classes)
+    discriminator = LightDiscriminator(num_classes=args.num_classes) if args.light else  FCDiscriminator(num_classes=args.num_classes) 
     if torch.cuda.is_available() and args.use_gpu:                          #Fare check del corretto funzionamento,
         discriminator = torch.nn.DataParallel(discriminator).cuda()         #in AdaptSegNet model_D1.cuda(args.gpu), dove args.gpu indica su quale device caricare
                                                                             # @Edoardo, dovrebbe essere uguale
-
-
+    
+    if args.flops:
+        parameter_flops_count(model, discriminator)
+    
 
     #Datasets instances 
     composed = transforms.Compose([transforms.ToTensor(),                                                               
@@ -439,15 +445,15 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         #Loss_seg
         loss_train_seg_mean = np.mean(loss_seg_record)
         writer.add_scalar('epoch/loss_epoch_train_seg', float(loss_train_seg_mean), epoch)
-        print('loss for train : %f' % (loss_train_seg_mean))
+        print(f'Average loss_seg for epoch {epoch}: {loss_train_seg_mean}')
         #Loss_adv
         loss_train_adv_mean = np.mean(loss_adv_record)
         writer.add_scalar('epoch/loss_epoch_train_adv', float(loss_train_adv_mean), epoch)
-        print('loss for train : %f' % (loss_train_adv_mean))
+        print(f'Average loss_adv for epoch {epoch}: {loss_train_adv_mean}')
         #Loss_D
         loss_train_D_mean = np.mean(loss_D_record)
         writer.add_scalar('epoch/loss_epoch_train_D', float(loss_train_D_mean), epoch)
-        print('loss for train : %f' % (loss_train_D_mean))
+        print(f'Average loss_D for epoch {epoch}: {loss_train_D_mean}')
 
         if epoch % args.checkpoint_step == 0 and epoch != 0:
             import os
@@ -545,6 +551,18 @@ def val(args, model, dataloader):
 
     return precision, miou
     
+def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)):
+
+    flops = FlopCountAnalysis(discriminator, F.softmax(model(input)[0])) #porcheria, da aggiustare
+    
+    parameters = sum(parameter_count(discriminator).values())
+
+
+    print("*" * 20)
+    print(f"Total number of operations: {round((flops.total()) / 1e+9, 4)}G FLOPS")
+    print(f"Total number of parameters: {parameters}")
+    print("*" * 20)
+    return (flops, parameters)
 
 
 if __name__ == '__main__':
