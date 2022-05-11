@@ -296,7 +296,8 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
 
     time = datetime.datetime.now()
     time = f"{time.month:2d}-{time.day:2d}_{time.hour:2d}.{time.minute:2d}"
-    writer = SummaryWriter(f"{args.tensorboard_logdir}{time}_{args.context_path}_batch={args.batch_size}_lr={args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})")
+    suffix = f"{time}_{args.context_path}_batch={args.batch_size}_lr={args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})"
+    writer = SummaryWriter(f"{args.tensorboard_logdir}{suffix}")
 
     #Set the loss of G
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
@@ -459,21 +460,20 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         writer.add_scalar('epoch/loss_epoch_train_D', float(loss_train_D_mean), epoch)
         print(f'Average loss_D for epoch {epoch}: {loss_train_D_mean}')
 
+        save_model_path = args.save_model_path + suffix
         if epoch % args.checkpoint_step == 0 and epoch != 0:
-            import os
-            if not os.path.isdir(args.save_model_path):
-                os.mkdir(args.save_model_path)
+            if not os.path.isdir(save_model_path):
+                os.mkdir(save_model_path)
             torch.save(model.module.state_dict(),
-                        os.path.join(args.save_model_path, 'latest_dice_loss.pth'))
+                        os.path.join(save_model_path, 'latest_model.pth'))
         
         if epoch % args.validation_step == 0 and epoch != 0:
                 precision, miou = val(args, model, valloader)
                 if miou > max_miou:
                     max_miou = miou
-                    import os 
-                    os.makedirs(args.save_model_path, exist_ok=True)
+                    os.makedirs(save_model_path, exist_ok=True)
                     torch.save(model.module.state_dict(),
-                            os.path.join(args.save_model_path, 'best_dice_loss.pth'))
+                            os.path.join(save_model_path, 'best_model.pth'))
                 writer.add_scalar('epoch/precision_val', precision, epoch)
                 writer.add_scalar('epoch/miou val', miou, epoch)
 
