@@ -70,7 +70,6 @@ class Cityscapes(VisionDataset):
         
         image = MeanSubtraction(self.mean)(image)
         label = Map(self.mapper)(label)
-        print(np.unique(label))
 
         
         if self.transforms and self.train:
