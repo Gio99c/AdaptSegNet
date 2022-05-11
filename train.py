@@ -520,8 +520,9 @@ def val(args, model, dataloader):
             # label = colour_code_segmentation(np.array(label), label_info)
             precision_record.append(precision)
 
-            #Save an output examples
-            if i % 10 == 0:
+            #Save an output examples #@ transformare in una funzione (con argomento anche il numero di immagini)
+            #@ if args.save_images... fare una roba del genere
+            if i % 100 == 0:
                 #image
                 image = image[0].copy()
                 mean = torch.as_tensor(info["mean"]).cuda()
@@ -542,7 +543,7 @@ def val(args, model, dataloader):
                 axs[2].imshow(label)
                 axs[2].axis('off')
                 ##save the final result
-                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSetNet/results/{i/2}.jpg')
+                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSetNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch?
                 
 
     
@@ -556,9 +557,9 @@ def val(args, model, dataloader):
 
     return precision, miou
     
-def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)):
+def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)): #@ da spostare in utils
 
-    flops = FlopCountAnalysis(discriminator, F.softmax(model(input)[0])) #porcheria, da aggiustare
+    flops = FlopCountAnalysis(discriminator, F.softmax(model(input)[0])) 
     
     parameters = sum(parameter_count(discriminator).values())
 
@@ -573,51 +574,52 @@ def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 102
 if __name__ == '__main__':
     params = [
         '--epoch_start_i', '0',
-        '--checkpoint_step', '5',
+        '--checkpoint_step', '7',
         '--validation_step', '7',
         '--num_epochs', '50',
         '--learning_rate', '2.5e-2',
         '--data_target', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/data/Cityscapes',
-        '--data_source', './data/GTA5',
+        '--data_source', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/data/GTA5',
         '--num_workers', '8',
         '--num_classes', '19',
         '--cuda', '0',
         '--batch_size', '8',
-        '--save_model_path', './checkpoints_101_sgd',
-        '--tensorboard_logdir', './runs/',
+        '--save_model_path', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/models/',
+        '--tensorboard_logdir', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/runs/',
         '--context_path', 'resnet101',  # set resnet18 or resnet101, only support resnet18 and resnet101
         '--optimizer', 'sgd',
 
     ]
-    #main(params)
-
-    args = get_arguments(params)
-
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
-    model = BiSeNet(args.num_classes, args.context_path)
-    if torch.cuda.is_available() and args.use_gpu:
-        model = torch.nn.DataParallel(model).cuda() 
-
-    composed = transforms.Compose([transforms.ToTensor(),                                                               
-                                    transforms.RandomHorizontalFlip(p=0.5),                                             
-                                    transforms.RandomAffine(0, scale=[0.75, 2.0]), 
-                                    transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
-
-    Cityscapes_dataset_val = Cityscapes(root= args.data_target,
-                         image_folder= 'images',
-                         labels_folder='labels',
-                         train=False,
-                         info_file= args.info_file,
-                         transforms= composed
-    )
     
-    valloader = DataLoader(Cityscapes_dataset_val,
-                            batch_size=1,
-                            shuffle=True, 
-                            num_workers=args.num_workers,
-                            pin_memory=True)
+    main(params)
+
+    # args = get_arguments(params)
+
+    # os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
+    # model = BiSeNet(args.num_classes, args.context_path)
+    # if torch.cuda.is_available() and args.use_gpu:
+    #     model = torch.nn.DataParallel(model).cuda() 
+
+    # composed = transforms.Compose([transforms.ToTensor(),                                                               
+    #                                 transforms.RandomHorizontalFlip(p=0.5),                                             
+    #                                 transforms.RandomAffine(0, scale=[0.75, 2.0]), 
+    #                                 transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
+
+    # Cityscapes_dataset_val = Cityscapes(root= args.data_target,
+    #                      image_folder= 'images',
+    #                      labels_folder='labels',
+    #                      train=False,
+    #                      info_file= args.info_file,
+    #                      transforms= composed
+    # )
     
-    print("Val loader creato")
-    val(args, model, valloader)
+    # valloader = DataLoader(Cityscapes_dataset_val,
+    #                         batch_size=1,
+    #                         shuffle=True, 
+    #                         num_workers=args.num_workers,
+    #                         pin_memory=True)
+    
+    # print("Val loader creato")
+    # val(args, model, valloader)
     
 
