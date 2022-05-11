@@ -2,6 +2,7 @@ from calendar import EPOCH
 from contextvars import Context
 import json
 import sys
+import datetime
 from turtle import color
 from xml.dom import VALIDATION_ERR
 sys.path.insert(1, "./")
@@ -293,7 +294,9 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
     scaler = amp.GradScaler() 
     scaler_dis = amp.GradScaler()
 
-    writer = SummaryWriter(args.tensorboard_logdir, comment=f"{args.context_path}_{args.batch_size}_{args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})")
+    time = datetime.datetime.now()
+    time = f"{time.year}-{time.month}-{time.day}_{time.hour}.{time.minute}"
+    writer = SummaryWriter(f"{args.tensorboard_logdir}{time}_{args.context_path}_{args.batch_size}_{args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})")
 
     #Set the loss of G
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
