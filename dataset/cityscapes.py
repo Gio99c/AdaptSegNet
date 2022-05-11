@@ -136,7 +136,7 @@ def printImageLabel(image, label):
 if __name__ == "__main__":
     crop_width = 1024
     crop_height = 512
-    composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
-    data = Cityscapes("./data/Cityscapes", "images/", list_path='train.txt',train=True, info_file="info.json", transforms=composed)
-    image = data[5]
-    transforms.ToPILImage()(image.to(torch.uint8)).show()
+    composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True)])
+    data = Cityscapes("./data/Cityscapes", "images/", 'labels/',train=True, info_file="info.json", transforms=composed)
+    image, label = data[5]
+    printImageLabel(image, label)
