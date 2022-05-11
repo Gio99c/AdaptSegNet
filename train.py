@@ -121,8 +121,6 @@ def get_arguments(params):
 
     parser.add_argument('--input_size_source', type=str, default=INPUT_SIZE_SOURCE, help='Size of input source image')
     parser.add_argument('--input_size_target', type=str, default=INPUT_SIZE_TARGET, help='Size of input target image')
-    parser.add_argument('--crop_width', type=int, default=CROP_WIDTH, help='Width of cropped/resized input image to network')
-    parser.add_argument('--crop_height', type=int, default=512, help='Height of cropped/resized input image to network')
     parser.add_argument('--random_seed', type=int, default=RANDOM_SEED, help='Random seed for reproducibility')
 
 
@@ -206,12 +204,10 @@ def main(params):
     #Datasets instances 
     composed_source = transforms.Compose([transforms.ToTensor(),                                                               
                                     transforms.RandomHorizontalFlip(p=0.5),                                             
-                                    transforms.RandomAffine(0, scale=[0.75, 2.0]), 
                                     transforms.RandomCrop(input_size_source, pad_if_needed=True)])
 
     composed_target = transforms.Compose([transforms.ToTensor(),                                                               
                                 transforms.RandomHorizontalFlip(p=0.5),                                             
-                                transforms.RandomAffine(0, scale=[0.75, 2.0]), 
                                 transforms.RandomCrop(input_size_target, pad_if_needed=True)])
 
     GTA5_dataset = GTA(root= args.data_source, 
@@ -297,7 +293,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
     scaler = amp.GradScaler() 
     scaler_dis = amp.GradScaler()
 
-    writer = SummaryWriter(args.tensorboard_logdir, comment=''.format(args.optimizer, args.context_path))
+    writer = SummaryWriter(args.tensorboard_logdir, comment=f"{args.context_path}_{args.batch_size}_{args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})")
 
     #Set the loss of G
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
@@ -524,16 +520,16 @@ def val(args, model, dataloader):
             #@ if args.save_images... fare una roba del genere
             if i % 100 == 0:
                 #image
-                image = image[0].copy()
+                image = image[0].clone().detach()
                 mean = torch.as_tensor(info["mean"]).cuda()
                 image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
                 image = transforms.ToPILImage()(image.to(torch.uint8))
                 #prediction
-                predict = torch.tensor(predict.copy(), torch.uint8)
+                predict = torch.tensor(predict.copy(), dtype=torch.uint8)
                 predict = colorLabel(predict, palette) 
                 #label from np to Pil Image
-                label = torch.tensor(label.copy(), torch.uint8)
-                label = colorLabel(label,palette)
+                label = torch.tensor(label.copy(), dtype=torch.uint8)
+                label = colorLabel(label, palette)
                 #crea la figura
                 fig, axs = plt.subplots(1,3, figsize=(10,5))
                 axs[0].imshow(image)
@@ -543,7 +539,7 @@ def val(args, model, dataloader):
                 axs[2].imshow(label)
                 axs[2].axis('off')
                 ##save the final result
-                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSetNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch?
+                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSetNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
                 
 
     
@@ -583,7 +579,7 @@ if __name__ == '__main__':
         '--num_workers', '8',
         '--num_classes', '19',
         '--cuda', '0',
-        '--batch_size', '8',
+        '--batch_size', '6',
         '--save_model_path', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/models/',
         '--tensorboard_logdir', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/runs/',
         '--context_path', 'resnet101',  # set resnet18 or resnet101, only support resnet18 and resnet101
@@ -592,34 +588,5 @@ if __name__ == '__main__':
     ]
     
     main(params)
-
-    # args = get_arguments(params)
-
-    # os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
-    # model = BiSeNet(args.num_classes, args.context_path)
-    # if torch.cuda.is_available() and args.use_gpu:
-    #     model = torch.nn.DataParallel(model).cuda() 
-
-    # composed = transforms.Compose([transforms.ToTensor(),                                                               
-    #                                 transforms.RandomHorizontalFlip(p=0.5),                                             
-    #                                 transforms.RandomAffine(0, scale=[0.75, 2.0]), 
-    #                                 transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
-
-    # Cityscapes_dataset_val = Cityscapes(root= args.data_target,
-    #                      image_folder= 'images',
-    #                      labels_folder='labels',
-    #                      train=False,
-    #                      info_file= args.info_file,
-    #                      transforms= composed
-    # )
-    
-    # valloader = DataLoader(Cityscapes_dataset_val,
-    #                         batch_size=1,
-    #                         shuffle=True, 
-    #                         num_workers=args.num_workers,
-    #                         pin_memory=True)
-    
-    # print("Val loader creato")
-    # val(args, model, valloader)
     
 
