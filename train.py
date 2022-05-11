@@ -1,6 +1,8 @@
 from calendar import EPOCH
 from contextvars import Context
+import json
 import sys
+from turtle import color
 from xml.dom import VALIDATION_ERR
 sys.path.insert(1, "/Users/gio/Documents/GitHub/BiSeNet")
 
@@ -15,7 +17,7 @@ import torch
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 import numpy as np
-from utils import poly_lr_scheduler
+from utils import colorLabel, poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, per_class_iu
 from loss import DiceLoss, flatten
 import torch.cuda.amp as amp
@@ -26,6 +28,7 @@ from dataset.gta import GTA
 from model.discriminator import FCDiscriminator
 from torch import nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
 #------------------------------------------------------------------------------
@@ -94,15 +97,10 @@ SET = 'train'
 print("Import terminato")
 
 #------------------------------------------------------------------------------------------------------
-#-------------------------------------------MAIN-------------------------------------------------------
+#-------------------------------------ARGUMENTS PARSING------------------------------------------------
 #------------------------------------------------------------------------------------------------------
+def get_arguments(params):
 
-
-def main(params):
-    """ Initialization and train launch """
-    print(os.listdir())
-
-    #-------------------------------Parse th arguments-------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_epochs', type=int, default=NUM_EPOCHS, help='Number of epochs to train for')                     # -> num_steps 
     parser.add_argument('--epoch_start_i', type=int, default=EPOCH_START_i, help='Start counting epochs from this number')
@@ -152,6 +150,21 @@ def main(params):
     parser.add_argument('--use_gpu', type=bool, default=True, help='whether to user gpu for training')
 
     args = parser.parse_args(params)
+
+    return args
+
+
+#------------------------------------------------------------------------------------------------------
+#-------------------------------------------MAIN-------------------------------------------------------
+#------------------------------------------------------------------------------------------------------
+
+
+def main(params):
+    """ Initialization and train launch """
+    print(os.listdir())
+
+    #-------------------------------Parse th arguments-------------------------------------------------
+    args = get_arguments(params)
     
     #-------------------------------------end arguments-----------------------------------------------
    
@@ -336,14 +349,15 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 #output = interp_source(output)
                 #output_sup1 = interp_source(output_sup1)
                 #output_sup2 = interp_source(output_sup2)
+                #source_labels = interp_source(source_labels)
                 #--------------------------------
 
                 loss1 = loss_func(output, source_labels)                #principal loss
                 loss2 = loss_func(output_sup1, source_labels)           #loss with respect to output_x16down
                 loss3 = loss_func(output_sup2, source_labels)           #loss with respect to output_(x32down*tail)
-                loss_seg = loss1+loss2+loss3                                # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
+                loss_seg = loss1+loss2+loss3                            # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
 
-            scaler.scale(loss_seg).backward() # @Edoardo, penso che questo si debba fare anche qui
+            scaler.scale(loss_seg).backward() 
 
 
             #Train with Target
@@ -351,7 +365,6 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 target_images = target_images.cuda()
 
             with amp.autocast():
-                #output_target, _, _ = model(source_images) #Al discriminatore va passato solo output - @Edoardo, ho commentato questa linea, penso volessi passare a model target_images.
                 output_target, _, _ = model(target_images) #Al discriminatore va passato solo output
 
                 #Qui andrebbero le interpolazioni - al momento comemmentati
@@ -367,7 +380,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                                                                                                         #NB source_label != source_labels, source_label = 0 etichetta per con cui D distingue source e target
                                                                                                         #                                  source_labels = labels del batch di immagini provenienti da GTA      
 
-                loss_adv = args.lambda_adv_target1 * loss_adv_target # @Edoardo, in questo modo la loss= loss1+loss2+loss3 viene sovrascritta, dobbiamo capire cosa fare qui
+                loss_adv = args.lambda_adv_target1 * loss_adv_target 
             
             scaler_dis.scale(loss_adv).backward()
 
@@ -388,7 +401,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
 
                 loss_D_source = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda())
 
-            #scaler_dis.scale(loss_D).backward()
+            
 
 
             # train with target
@@ -408,7 +421,6 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             #Lo step degli optmizer va alla fine dei due training
             scaler.step(optimizer)
             scaler_dis.step(dis_optimizer)
-            #Qua va lo step dell'optimizer del Discriminator
             scaler.update()
             scaler_dis.update()
 
@@ -462,19 +474,23 @@ def val(args, model, dataloader):
 
     # label_info = get_label_info(csv_path)
 
+    #prepare info_file to save examples
+    info = json.load(open(args.data_target+"/"+args.info_file))
+    palette = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
+
     with torch.no_grad():
         model.eval() #set the model in the evaluation mode
         precision_record = []
         hist = np.zeros((args.num_classes, args.num_classes)) #create a square arrey with side num_classes
-        for i, (data, label) in enumerate(tqdm(dataloader)): #get a batch of data and the respective label at each iteration
+        for i, (image, label) in enumerate(tqdm(dataloader)): #get a batch of data and the respective label at each iteration
             label = label.type(torch.LongTensor) #set the type of the label to long
             label = label.long()
             if torch.cuda.is_available() and args.use_gpu:
-                data = data.cuda()
+                image = image.cuda()
                 label = label.cuda()
 
             #get RGB predict image
-            predict = model(data).squeeze() #remove all the dimension equal to one => For example, if input is of shape: (A×1×B×C×1×D) then the out tensor will be of shape: (A×B×C×D)
+            predict = model(image).squeeze() #remove all the dimension equal to one => For example, if input is of shape: (A×1×B×C×1×D) then the out tensor will be of shape: (A×B×C×D)
             predict = reverse_one_hot(predict) #from one_hot_encoding to class key?
             predict = np.array(predict.cpu()) #move predict to cpu and convert it into a numpy array
 
@@ -486,12 +502,37 @@ def val(args, model, dataloader):
 
             #compute per pixel accuracy
             precision = compute_global_accuracy(predict, label) #accuracy of the prediction
-            hist += fast_hist(label.flatten(), predict.flatten(), args.num_classes) #cosa fa ? // Sono invertiti gli argomenti?
+            hist += fast_hist(label.flatten(), predict.flatten(), args.num_classes) 
             
             # there is no need to transform the one-hot array to visual RGB array
             # predict = colour_code_segmentation(np.array(predict), label_info)
             # label = colour_code_segmentation(np.array(label), label_info)
             precision_record.append(precision)
+
+            #Save an output examples
+            if i % 10 == 0:
+                #image
+                image = image[0].copy()
+                mean = torch.as_tensor(info["mean"]).cuda()
+                image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
+                image = transforms.ToPILImage()(image.to(torch.uint8))
+                #prediction
+                predict = torch.tensor(predict.copy(), torch.uint8)
+                predict = colorLabel(predict, palette) 
+                #label from np to Pil Image
+                label = torch.tensor(label.copy(), torch.uint8)
+                label = colorLabel(label,palette)
+                #crea la figura
+                fig, axs = plt.subplots(1,3, figsize=(10,5))
+                axs[0].imshow(image)
+                axs[0].axis('off')
+                axs[1].imshow(predict)
+                axs[1].axis('off')
+                axs[2].imshow(label)
+                axs[2].axis('off')
+                ##save the final result
+                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSetNet/results/{i/2}.jpg')
+                
 
     
     precision = np.mean(precision_record)
@@ -513,7 +554,7 @@ if __name__ == '__main__':
         '--validation_step', '7',
         '--num_epochs', '50',
         '--learning_rate', '2.5e-2',
-        '--data_target', './data/Cityscapes',
+        '--data_target', '/content/drive/MyDrive/MLDL_Project/AdaptSetNet/data/Cityscapes',
         '--data_source', './data/GTA5',
         '--num_workers', '8',
         '--num_classes', '19',
@@ -525,5 +566,35 @@ if __name__ == '__main__':
         '--optimizer', 'sgd',
 
     ]
-    main(params)
+    #main(params)
+
+    args = get_arguments(params)
+
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
+    model = BiSeNet(args.num_classes, args.context_path)
+    if torch.cuda.is_available() and args.use_gpu:
+        model = torch.nn.DataParallel(model).cuda() 
+
+    composed = transforms.Compose([transforms.ToTensor(),                                                               
+                                    transforms.RandomHorizontalFlip(p=0.5),                                             
+                                    transforms.RandomAffine(0, scale=[0.75, 2.0]), 
+                                    transforms.RandomCrop((args.crop_height, args.crop_width), pad_if_needed=True)])
+
+    Cityscapes_dataset_val = Cityscapes(root= args.data_target,
+                         image_folder= 'images',
+                         labels_folder='labels',
+                         train=False,
+                         info_file= args.info_file,
+                         transforms= composed
+    )
+    
+    valloader = DataLoader(Cityscapes_dataset_val,
+                            batch_size=1,
+                            shuffle=True, 
+                            num_workers=args.num_workers,
+                            pin_memory=True)
+    
+    print("Val loader creato")
+    val(args, model, valloader)
+    
 

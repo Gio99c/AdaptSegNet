@@ -1,4 +1,8 @@
-#from turtle import color
+import sys
+sys.path.insert(1, "./")
+
+from cProfile import label
+from turtle import color
 import torch
 import numpy as np
 from torchvision import transforms
@@ -9,52 +13,9 @@ import matplotlib.pyplot as plt
 import torchvision
 import json
 
-class Map:
-    """
-    Maps every pixel to the respective object in the dictionary
-    Input:
-        mapper: dict, dictionary of the mapping
-    """
-    def __init__(self, mapper):
-        self.mapper = mapper
-
-    def __call__(self, input):
-        return np.vectorize(self.mapper.__getitem__, otypes=[np.float32])(input)
-
-class Map2:
-    """
-    Maps every pixel to the respective object in the dictionary
-    Input:
-        mapper: dict, dictionary of the mapping
-    """
-    def __init__(self, mapper):
-        self.mapper = mapper
-
-    def __call__(self, input):
-        return np.array([[self.mapper[element] for element in row]for row in input], dtype=np.float32)
-
-class ToTensor:
-    """
-    Convert into a tensor of float32: differently from transforms.ToTensor() this function does not normalize the values in [0,1] and does not swap the dimensions
-    """
-    def __call__(self, input):
-        return torch.as_tensor(input, dtype=torch.float32)
+from utils import Map, Map2, MeanSubtraction, ToNumpy, colorLabel
 
 
-class ToNumpy:
-    """
-    Convert into a tensor into a numpy array
-    """
-    def __call__(self, input):
-        return input.numpy()
-
-# Don't know if it will be useful or if we will subtract the mean inside the dataset class
-class MeanSubtraction:
-    def __init__(self, mean):
-        self.mean = np.array(mean, dtype=np.float32)
-
-    def __call__(self, input):
-        return input - self.mean
 
 
 class Cityscapes(VisionDataset):
@@ -109,6 +70,8 @@ class Cityscapes(VisionDataset):
         
         image = MeanSubtraction(self.mean)(image)
         label = Map(self.mapper)(label)
+        print(np.unique(label))
+
         
         if self.transforms and self.train:
             seed = np.random.randint(10000)
@@ -122,21 +85,40 @@ class Cityscapes(VisionDataset):
         
         return image, label[0]
 
-def printImageLabel(image, label):
-    info = json.load(open("/Users/gio/Documents/GitHub/BiSeNet/data/Cityscapes/info.json"))
-    mean = torch.as_tensor(info["mean"])
-    image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
-    mapper = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
-    fig, axs = plt.subplots(1,2, figsize=(10,5))
-    composed = torchvision.transforms.Compose([ToNumpy(), Map2(mapper), transforms.ToTensor(), transforms.ToPILImage()])
-    axs[0].imshow(transforms.ToPILImage()(image.to(torch.uint8)))
-    axs[1].imshow(composed(label))
-    plt.show()
+
+
 
 if __name__ == "__main__":
     crop_width = 1024
     crop_height = 512
-    composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
-    data = Cityscapes("./data/Cityscapes", "images/", list_path='train.txt',train=True, info_file="info.json", transforms=composed)
-    image = data[5]
-    transforms.ToPILImage()(image.to(torch.uint8)).show()
+    composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True)])
+    data = Cityscapes("./data/Cityscapes", "images/", labels_folder='labels/',train=True, info_file="info.json", transforms=composed)
+    image, label = data[5]
+    
+    
+    
+    #info
+    info = json.load(open("./data/Cityscapes/info.json"))
+
+    #Image
+    image = transforms.ToPILImage()(image.to(torch.uint8))
+    
+    #Label
+    info = json.load(open("./data/Cityscapes/info.json"))
+    palette = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
+    label = colorLabel(label,palette)
+
+
+    fig, axs = plt.subplots(1,2, figsize=(10,5))
+    axs[0].imshow(image)
+    axs[0].axis('off')
+    axs[1].imshow(label)
+    axs[1].axis('off')
+    plt.show()
+
+
+    
+    #transforms.ToPILImage()(image_label.to(torch.uint8)).show()
+
+
+
