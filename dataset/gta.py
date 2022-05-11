@@ -9,9 +9,52 @@ import matplotlib.pyplot as plt
 import torchvision
 import json
 
-from utils import Map, Map2, MeanSubtraction, ToNumpy
+class Map:
+    """
+    Maps every pixel to the respective object in the dictionary
+    Input:
+        mapper: dict, dictionary of the mapping
+    """
+    def __init__(self, mapper):
+        self.mapper = mapper
+
+    def __call__(self, input):
+        return np.vectorize(self.mapper.__getitem__, otypes=[np.float32])(input)
+
+class Map2:
+    """
+    Maps every pixel to the respective object in the dictionary
+    Input:
+        mapper: dict, dictionary of the mapping
+    """
+    def __init__(self, mapper):
+        self.mapper = mapper
+
+    def __call__(self, input):
+        return np.array([[self.mapper[element] for element in row]for row in input], dtype=np.float32)
+
+class ToTensor:
+    """
+    Convert into a tensor of float32: differently from transforms.ToTensor() this function does not normalize the values in [0,1] and does not swap the dimensions
+    """
+    def __call__(self, input):
+        return torch.as_tensor(input, dtype=torch.float32)
 
 
+class ToNumpy:
+    """
+    Convert into a tensor into a numpy array
+    """
+    def __call__(self, input):
+        return input.numpy()
+
+# Don't know if it will be useful or if we will subtract the mean inside the dataset class
+class MeanSubtraction:
+    def __init__(self, mean):
+        self.mean = np.array(mean, dtype=np.float32)
+
+    def __call__(self, input):
+        return input - self.mean
 
 
 class GTA(VisionDataset):
@@ -62,7 +105,7 @@ class GTA(VisionDataset):
         image = np.array(Image.open(image_path), dtype=np.float32)
         label = np.array(Image.open(label_path), dtype=np.float32)
         
-        image = MeanSubtraction(self.mean)(image)
+        #image = MeanSubtraction(self.mean)(image)
         label = Map(self.mapper)(label)
         
         if self.transforms:
@@ -75,7 +118,7 @@ class GTA(VisionDataset):
         return image, label[0]
 
 def printImageLabel(image, label):
-    info = json.load(open("data/GTA5/info.json"))
+    info = json.load(open("/Users/gio/Documents/GitHub/BiSeNet/data/Cityscapes/info.json"))
     mean = torch.as_tensor(info["mean"])
     image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
     mapper = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
@@ -92,7 +135,5 @@ if __name__ == "__main__":
     data = GTA("./data/GTA5", "images/", "labels/", 'train.txt',info_file="info.json", transforms=composed)
     image, label = data[5]
 
-    image = transforms.ToPILImage()(image.to(torch.uint8))
-    label = transforms.ToPILImage()(label.to(torch.uint8))
-
-    printImageLabel(image,label)
+    transforms.ToPILImage()(image.to(torch.uint8)).show()
+    transforms.ToPILImage()(label.to(torch.uint8)).show()

@@ -1,6 +1,5 @@
 ## SEBASTIANO
 # Implement utils.py
-import json
 import torch.nn as nn
 import torch
 from torch.nn import functional as F
@@ -10,12 +9,6 @@ import pandas as pd
 import random
 import numbers
 import torchvision
-from torchvision import transforms
-
-
-#-------------------------------------------------------------
-#-----------------PREDEFINED FUNCTIONS------------------------
-#-------------------------------------------------------------
 
 def poly_lr_scheduler(optimizer, init_lr, iter, lr_decay_iter=1, max_iter=300, power=0.9):
 	"""Polynomial decay of learning rate
@@ -148,7 +141,70 @@ def per_class_iu(hist):
 	epsilon = 1e-5
 	return (np.diag(hist)) / (hist.sum(1) + hist.sum(0) - np.diag(hist) + epsilon)
 
+class RandomCrop(object):
+	"""Crop the given PIL Image at a random location.
+	Args:
+		size (sequence or int): Desired output size of the crop. If size is an
+			int instead of sequence like (h, w), a square crop (size, size) is
+			made.
+		padding (int or sequence, optional): Optional padding on each border
+			of the image. Default is 0, i.e no padding. If a sequence of length
+			4 is provided, it is used to pad left, top, right, bottom borders
+			respectively.
+		pad_if_needed (boolean): It will pad the image if smaller than the
+			desired size to avoid raising an exception.
+	"""
 
+	def __init__(self, size, seed, padding=0, pad_if_needed=False):
+		if isinstance(size, numbers.Number):
+			self.size = (int(size), int(size))
+		else:
+			self.size = size
+		self.padding = padding
+		self.pad_if_needed = pad_if_needed
+		self.seed = seed
+
+	@staticmethod
+	def get_params(img, output_size, seed):
+		"""Get parameters for ``crop`` for a random crop.
+		Args:
+			img (PIL Image): Image to be cropped.
+			output_size (tuple): Expected output size of the crop.
+		Returns:
+			tuple: params (i, j, h, w) to be passed to ``crop`` for random crop.
+		"""
+		random.seed(seed)
+		w, h = img.size
+		th, tw = output_size
+		if w == tw and h == th:
+			return 0, 0, h, w
+		i = random.randint(0, h - th)
+		j = random.randint(0, w - tw)
+		return i, j, th, tw
+
+	def __call__(self, img):
+		"""
+		Args:
+			img (PIL Image): Image to be cropped.
+		Returns:
+			PIL Image: Cropped image.
+		"""
+		if self.padding > 0:
+			img = torchvision.transforms.functional.pad(img, self.padding)
+
+		# pad the width if needed
+		if self.pad_if_needed and img.size[0] < self.size[1]:
+			img = torchvision.transforms.functional.pad(img, (int((1 + self.size[1] - img.size[0]) / 2), 0))
+		# pad the height if needed
+		if self.pad_if_needed and img.size[1] < self.size[0]:
+			img = torchvision.transforms.functional.pad(img, (0, int((1 + self.size[0] - img.size[1]) / 2)))
+
+		i, j, h, w = self.get_params(img, self.size, self.seed)
+
+		return torchvision.transforms.functional.crop(img, i, j, h, w)
+
+	def __repr__(self):
+		return self.__class__.__name__ + '(size={0}, padding={1})'.format(self.size, self.padding)
 
 def cal_miou(miou_list, csv_path):
 	# return label -> {label_name: [r_value, g_value, b_value, ...}
@@ -228,132 +284,3 @@ def one_hot(label):
     semantic_map = np.stack(semantic_map, axis=-1).astype(np.float32)
 
     return semantic_map
-
-#------------------------------------------------------------
-#------------------CUSTOM FUNCTIONS--------------------------
-#------------------------------------------------------------
-
-def colorLabel(label, palette):
-    composed = torchvision.transforms.Compose([ToNumpy(), Map2(palette), transforms.ToTensor(), transforms.ToPILImage()])
-    label = composed(label)
-    return label
-
-
-
-
-#------------------------------------------------------------
-#------------------CUSTOM TRANSFORMS-------------------------
-#------------------------------------------------------------
-
-
-class Map:
-    """
-    Maps every pixel to the respective object in the dictionary
-    Input:
-        mapper: dict, dictionary of the mapping
-    """
-    def __init__(self, mapper):
-        self.mapper = mapper
-
-    def __call__(self, input):
-        return np.vectorize(self.mapper.__getitem__, otypes=[np.float32])(input)
-
-class Map2:
-    """
-    Maps every pixel to the respective object in the dictionary
-    Input:
-        mapper: dict, dictionary of the mapping
-    """
-    def __init__(self, mapper):
-        self.mapper = mapper
-
-    def __call__(self, input):
-        return np.array([[self.mapper[element] for element in row]for row in input], dtype=np.float32)
-
-class ToTensor:
-    """
-    Convert into a tensor of float32: differently from transforms.ToTensor() this function does not normalize the values in [0,1] and does not swap the dimensions
-    """
-    def __call__(self, input):
-        return torch.as_tensor(input, dtype=torch.float32)
-
-
-class ToNumpy:
-    """
-    Convert into a tensor into a numpy array
-    """
-    def __call__(self, input):
-        return input.numpy()
-
-# Don't know if it will be useful or if we will subtract the mean inside the dataset class
-class MeanSubtraction:
-    def __init__(self, mean):
-        self.mean = np.array(mean, dtype=np.float32)
-
-    def __call__(self, input):
-        return input - self.mean
-
-class RandomCrop(object):
-	"""Crop the given PIL Image at a random location.
-	Args:
-		size (sequence or int): Desired output size of the crop. If size is an
-			int instead of sequence like (h, w), a square crop (size, size) is
-			made.
-		padding (int or sequence, optional): Optional padding on each border
-			of the image. Default is 0, i.e no padding. If a sequence of length
-			4 is provided, it is used to pad left, top, right, bottom borders
-			respectively.
-		pad_if_needed (boolean): It will pad the image if smaller than the
-			desired size to avoid raising an exception.
-	"""
-
-	def __init__(self, size, seed, padding=0, pad_if_needed=False):
-		if isinstance(size, numbers.Number):
-			self.size = (int(size), int(size))
-		else:
-			self.size = size
-		self.padding = padding
-		self.pad_if_needed = pad_if_needed
-		self.seed = seed
-
-	@staticmethod
-	def get_params(img, output_size, seed):
-		"""Get parameters for ``crop`` for a random crop.
-		Args:
-			img (PIL Image): Image to be cropped.
-			output_size (tuple): Expected output size of the crop.
-		Returns:
-			tuple: params (i, j, h, w) to be passed to ``crop`` for random crop.
-		"""
-		random.seed(seed)
-		w, h = img.size
-		th, tw = output_size
-		if w == tw and h == th:
-			return 0, 0, h, w
-		i = random.randint(0, h - th)
-		j = random.randint(0, w - tw)
-		return i, j, th, tw
-
-	def __call__(self, img):
-		"""
-		Args:
-			img (PIL Image): Image to be cropped.
-		Returns:
-			PIL Image: Cropped image.
-		"""
-		if self.padding > 0:
-			img = torchvision.transforms.functional.pad(img, self.padding)
-
-		# pad the width if needed
-		if self.pad_if_needed and img.size[0] < self.size[1]:
-			img = torchvision.transforms.functional.pad(img, (int((1 + self.size[1] - img.size[0]) / 2), 0))
-		# pad the height if needed
-		if self.pad_if_needed and img.size[1] < self.size[0]:
-			img = torchvision.transforms.functional.pad(img, (0, int((1 + self.size[0] - img.size[1]) / 2)))
-
-		i, j, h, w = self.get_params(img, self.size, self.seed)
-
-		return torchvision.transforms.functional.crop(img, i, j, h, w)
-
-	def __repr__(self):
-		return self.__class__.__name__ + '(size={0}, padding={1})'.format(self.size, self.padding)
