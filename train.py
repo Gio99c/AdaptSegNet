@@ -23,7 +23,7 @@ from torchvision import transforms
 from PIL import Image
 from dataset.cityscapes import Cityscapes
 from dataset.gta import GTA
-from model.discriminator import FCDiscriminator
+from model.discriminator import FCDiscriminator, LightDiscriminator
 from torch import nn
 import torch.nn.functional as F
 from fvcore.nn import FlopCountAnalysis
@@ -66,7 +66,8 @@ PRETRAINED_MODEL_PATH = None
 CONTEXT_PATH = "resnet101"
 OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
-FLOPS = False
+FLOPS = True
+LIGHT = True
 
 TENSORBOARD_LOGDIR = 'run'
 CHECKPOINT_STEP = 5
@@ -142,7 +143,8 @@ def main(params):
     parser.add_argument('--optimizer', type=str, default=OPTIMIZER, help='optimizer, support rmsprop, sgd, adam')
     parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
     parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of paramter and the number of flops')
-    
+    parser.add_argument('--light', type=bool, default=LIGHT, help='Perform the training with the lightweight discriminator')
+
 
     parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
     parser.add_argument('--checkpoint_step', type=int, default=CHECKPOINT_STEP, help='How often to save checkpoints (epochs)')
@@ -179,7 +181,7 @@ def main(params):
         print('Done!')
 
     #Build the Discirminator
-    discriminator = FCDiscriminator(num_classes=args.num_classes)
+    discriminator = LightDiscriminator(num_classes=args.num_classes) if args.light else  FCDiscriminator(num_classes=args.num_classes) 
     if torch.cuda.is_available() and args.use_gpu:                          #Fare check del corretto funzionamento,
         discriminator = torch.nn.DataParallel(discriminator).cuda()         #in AdaptSegNet model_D1.cuda(args.gpu), dove args.gpu indica su quale device caricare
                                                                             # @Edoardo, dovrebbe essere uguale
@@ -431,15 +433,15 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         #Loss_seg
         loss_train_seg_mean = np.mean(loss_seg_record)
         writer.add_scalar('epoch/loss_epoch_train_seg', float(loss_train_seg_mean), epoch)
-        print('loss for train : %f' % (loss_train_seg_mean))
+        print(f'Average loss_seg for epoch {epoch}: {loss_train_seg_mean}')
         #Loss_adv
         loss_train_adv_mean = np.mean(loss_adv_record)
         writer.add_scalar('epoch/loss_epoch_train_adv', float(loss_train_adv_mean), epoch)
-        print('loss for train : %f' % (loss_train_adv_mean))
+        print(f'Average loss_adv for epoch {epoch}: {loss_train_adv_mean}')
         #Loss_D
         loss_train_D_mean = np.mean(loss_D_record)
         writer.add_scalar('epoch/loss_epoch_train_D', float(loss_train_D_mean), epoch)
-        print('loss for train : %f' % (loss_train_D_mean))
+        print(f'Average loss_D for epoch {epoch}: {loss_train_D_mean}')
 
         if epoch % args.checkpoint_step == 0 and epoch != 0:
             import os
