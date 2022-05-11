@@ -185,7 +185,7 @@ def main(params):
                                                                             # @Edoardo, dovrebbe essere uguale
     
     if args.flops:
-        parameter_flops_count()
+        parameter_flops_count(model, discriminator)
     
 
     #Datasets instances 
@@ -510,19 +510,16 @@ def val(args, model, dataloader):
     
 def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)):
 
-    flops_model = FlopCountAnalysis(model, input)
-    flops_dis = FlopCountAnalysis(discriminator, F.softmax(model(input)[0]))
-
-    parameter_model = sum(parameter_count(model).values())
-    parameter_dis = sum(parameter_count(discriminator).values())
+    flops = FlopCountAnalysis(discriminator, F.softmax(model(input)[0])) #porcheria, da aggiustare
+    
+    parameters = sum(parameter_count(discriminator).values())
 
 
     print("*" * 20)
-    print(f"Total number of operations: {round((flops_model.total() + flops_dis.total()) / 1e+12, 2)}T FLOPS")
-    print(parameter_model)
-    print(f"Total number of parameters: {parameter_model + parameter_dis}")
+    print(f"Total number of operations: {round((flops.total()) / 1e+9, 4)}G FLOPS")
+    print(f"Total number of parameters: {parameters}")
     print("*" * 20)
-    return (flops_model + flops_dis, parameter_model + parameter_dis)
+    return (flops, parameters)
 
 
 if __name__ == '__main__':
