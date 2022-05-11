@@ -295,7 +295,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
     scaler_dis = amp.GradScaler()
 
     time = datetime.datetime.now()
-    time = f"{time.month:2d}-{time.day:2d}_{time.hour:2d}.{time.minute:2d}"
+    time = f"{time.month:02d}-{time.day:02d}_{time.hour:02d}.{time.minute:02d}"
     suffix = f"{time}_{args.context_path}_light={args.light}_batch={args.batch_size}_lr={args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})"
     writer = SummaryWriter(f"{args.tensorboard_logdir}{suffix}")
 
