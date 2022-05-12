@@ -19,7 +19,7 @@ import torch
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 import numpy as np
-from utils import colorLabel, poly_lr_scheduler
+from utils import save_images, parameter_flops_count, colorLabel, poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, per_class_iu
 from loss import DiceLoss, flatten
 import torch.cuda.amp as amp
@@ -30,9 +30,6 @@ from dataset.gta import GTA
 from model.discriminator import FCDiscriminator, LightDiscriminator
 from torch import nn
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
-from fvcore.nn import FlopCountAnalysis
-from fvcore.nn.parameter_count import parameter_count
 
 
 #------------------------------------------------------------------------------
@@ -73,6 +70,7 @@ OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
 FLOPS = False
 LIGHT = True
+SAVE = True
 
 TENSORBOARD_LOGDIR = 'run'
 CHECKPOINT_STEP = 5
@@ -140,9 +138,9 @@ def get_arguments(params):
     parser.add_argument('--context_path', type=str, default=CONTEXT_PATH, help='The context path model you are using, resnet18, resnet101.')
     parser.add_argument('--optimizer', type=str, default=OPTIMIZER, help='optimizer, support rmsprop, sgd, adam')
     parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
-    parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of paramter and the number of flops')
+    parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of parameter and the number of flops')
     parser.add_argument('--light', type=bool, default=LIGHT, help='Perform the training with the lightweight discriminator')
-
+    parser.add_argument('--save_images', type=bool, default=SAVE, help='Save image samples')
 
     parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
     parser.add_argument('--checkpoint_step', type=int, default=CHECKPOINT_STEP, help='How often to save checkpoints (epochs)')
@@ -200,7 +198,12 @@ def main(params):
                                                                             # @Edoardo, dovrebbe essere uguale
     
     if args.flops:
-        parameter_flops_count(model, discriminator)
+        flops, parameters = parameter_flops_count(model, discriminator)
+        
+        print("*" * 20)
+        print(f"Total number of operations: {round((flops.total()) / 1e+9, 4)}G FLOPS")
+        print(f"Total number of parameters: {parameters}")
+        print("*" * 20)
     
 
     #Datasets instances 
@@ -519,32 +522,10 @@ def val(args, model, dataloader):
             # label = colour_code_segmentation(np.array(label), label_info)
             precision_record.append(precision)
 
-            #Save an output examples #@ transformare in una funzione (con argomento anche il numero di immagini)
-            #@ if args.save_images... fare una roba del genere
-            if i % 100 == 0:
-                #image
-                image = image[0].clone().detach()
-                mean = torch.as_tensor(info["mean"]).cuda()
-                image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
-                image = transforms.ToPILImage()(image.to(torch.uint8))
-                #prediction
-                predict = torch.tensor(predict.copy(), dtype=torch.uint8)
-                predict = colorLabel(predict, palette) 
-                #label from np to Pil Image
-                label = torch.tensor(label.copy(), dtype=torch.uint8)
-                label = colorLabel(label, palette)
-                #crea la figura
-                fig, axs = plt.subplots(1,3, figsize=(10,5))
-                axs[0].imshow(image)
-                axs[0].axis('off')
-                axs[1].imshow(predict)
-                axs[1].axis('off')
-                axs[2].imshow(label)
-                axs[2].axis('off')
-                ##save the final result
-                plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSegNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
-                
-
+            if args.save_images:
+                mean = torch.as_tensor(info["mean"]).cuda() 
+                save_images(i, mean, palette, image, predict, label) 
+           
     
     precision = np.mean(precision_record)
     miou_list = per_class_iu(hist) #come funziona questo metodo?
@@ -556,18 +537,7 @@ def val(args, model, dataloader):
 
     return precision, miou
     
-def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)): #@ da spostare in utils
 
-    flops = FlopCountAnalysis(discriminator, F.softmax(model(input)[0])) 
-    
-    parameters = sum(parameter_count(discriminator).values())
-
-
-    print("*" * 20)
-    print(f"Total number of operations: {round((flops.total()) / 1e+9, 4)}G FLOPS")
-    print(f"Total number of parameters: {parameters}")
-    print("*" * 20)
-    return (flops, parameters)
 
 
 if __name__ == '__main__':

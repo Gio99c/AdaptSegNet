@@ -1,5 +1,3 @@
-## SEBASTIANO
-# Implement utils.py
 import json
 import torch.nn as nn
 import torch
@@ -11,6 +9,9 @@ import random
 import numbers
 import torchvision
 from torchvision import transforms
+from fvcore.nn import FlopCountAnalysis
+from fvcore.nn.parameter_count import parameter_count
+import matplotlib.pyplot as plt
 
 
 #-------------------------------------------------------------
@@ -148,8 +149,6 @@ def per_class_iu(hist):
 	epsilon = 1e-5
 	return (np.diag(hist)) / (hist.sum(1) + hist.sum(0) - np.diag(hist) + epsilon)
 
-
-
 def cal_miou(miou_list, csv_path):
 	# return label -> {label_name: [r_value, g_value, b_value, ...}
 	ann = pd.read_csv(csv_path)
@@ -203,10 +202,6 @@ def group_weight(weight_group, module, norm_layer, lr):
 	weight_group.append(dict(params=group_no_decay, weight_decay=.0, lr=lr))
 	return weight_group
 
-	
-
-
-
 def map_label(label, label_mappign_info):
     # re-assign labels to match the format of Cityscapes
     label_copy = 255 * np.ones(label.shape, dtype=np.float32)
@@ -229,6 +224,8 @@ def one_hot(label):
 
     return semantic_map
 
+
+
 #------------------------------------------------------------
 #------------------CUSTOM FUNCTIONS--------------------------
 #------------------------------------------------------------
@@ -238,13 +235,41 @@ def colorLabel(label, palette):
     label = composed(label)
     return label
 
+def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 1024)): 
+	# return the count of discirminator's flops and parameters 
+    flops = FlopCountAnalysis(discriminator, F.softmax(model(input)[0])) 
+    parameters = sum(parameter_count(discriminator).values())
+    return (flops, parameters)
+
+def save_images(i, mean, palette, image, predict, label):
+	#Save an output examples
+        if i % 100 == 0:
+            #image
+            image = image[0].clone().detach()
+            image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
+            image = transforms.ToPILImage()(image.to(torch.uint8))
+            #prediction
+            predict = torch.tensor(predict.copy(), dtype=torch.uint8)
+            predict = colorLabel(predict, palette) 
+            #label from np to Pil Image
+            label = torch.tensor(label.copy(), dtype=torch.uint8)
+            label = colorLabel(label, palette)
+            #create the figure
+            fig, axs = plt.subplots(1,3, figsize=(10,5))
+            axs[0].imshow(image)
+            axs[0].axis('off')
+            axs[1].imshow(predict)
+            axs[1].axis('off')
+            axs[2].imshow(label)
+            axs[2].axis('off')
+            #save the final result
+            plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSegNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
 
 
 
 #------------------------------------------------------------
 #------------------CUSTOM TRANSFORMS-------------------------
 #------------------------------------------------------------
-
 
 class Map:
     """
@@ -276,7 +301,6 @@ class ToTensor:
     """
     def __call__(self, input):
         return torch.as_tensor(input, dtype=torch.float32)
-
 
 class ToNumpy:
     """
