@@ -185,18 +185,13 @@ def main(params):
     if torch.cuda.is_available() and args.use_gpu:
         model = torch.nn.DataParallel(model).cuda()
 
-    #Load pretrained model if exists
-    if args.pretrained_model_path is not None:
-        print('load model from %s ...' % args.pretrained_model_path)
-        model.module.load_state_dict(torch.load(args.pretrained_model_path))
-        print('Done!')
-
     #Build the Discirminator
     discriminator = LightDiscriminator(num_classes=args.num_classes) if args.light else  FCDiscriminator(num_classes=args.num_classes) 
-    if torch.cuda.is_available() and args.use_gpu:                          #Fare check del corretto funzionamento,
-        discriminator = torch.nn.DataParallel(discriminator).cuda()         #in AdaptSegNet model_D1.cuda(args.gpu), dove args.gpu indica su quale device caricare
-                                                                            # @Edoardo, dovrebbe essere uguale
+    if torch.cuda.is_available() and args.use_gpu:                         
+        discriminator = torch.nn.DataParallel(discriminator).cuda()                                                                           
     
+
+    #Flops and paramters counter
     if args.flops:
         flops, parameters = parameter_flops_count(model, discriminator)
         
@@ -204,6 +199,14 @@ def main(params):
         print(f"Total number of operations: {round((flops.total()) / 1e+9, 4)}G FLOPS")
         print(f"Total number of parameters: {parameters}")
         print("*" * 20)
+
+
+    #Load pretrained model if exists
+    if args.pretrained_model_path is not None:
+        print('load model from %s ...' % args.pretrained_model_path)
+        model.module.load_state_dict(torch.load(f"{args.pretrained_model_path}/latest_model.pth"))
+        discriminator.module.load_state_dict(torch.load(f"{args.pretrained_model_path}/latest_discriminator.pth"))
+        print('Done!')
     
 
     #Datasets instances 
@@ -467,8 +470,8 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         if epoch % args.checkpoint_step == 0 and epoch != 0:
             if not os.path.isdir(save_model_path):
                 os.mkdir(save_model_path)
-            torch.save(model.module.state_dict(),
-                        os.path.join(save_model_path, 'latest_model.pth'))
+            torch.save(model.module.state_dict(), os.path.join(save_model_path, 'latest_model.pth'))
+            torch.save(discriminator.module.state_dict(), os.path.join(save_model_path, 'latest_discriminator.pth'))
         
         if epoch % args.validation_step == 0 and epoch != 0:
                 precision, miou = val(args, model, valloader)
