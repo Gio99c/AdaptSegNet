@@ -241,31 +241,34 @@ def parameter_flops_count(model, discriminator, input=torch.randn(8, 3, 512, 102
     parameters = sum(parameter_count(discriminator).values())
     return (flops, parameters)
 
-def save_images(i, mean, palette, image, predict, label):
+def save_images(mean, palette, image, predict, label, path_to_save):
 	#Save an output examples
-        if i % 100 == 0:
-            #image
-            image = image[0].clone().detach()
-            image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
-            image = transforms.ToPILImage()(image.to(torch.uint8))
-            #prediction
-            predict = torch.tensor(predict.copy(), dtype=torch.uint8)
-            predict = colorLabel(predict, palette) 
-            #label from np to Pil Image
-            label = torch.tensor(label.copy(), dtype=torch.uint8)
-            label = colorLabel(label, palette)
-            #create the figure
-            fig, axs = plt.subplots(1,3, figsize=(10,5))
-            axs[0].imshow(image)
-            axs[0].axis('off')
-            axs[1].imshow(predict)
-            axs[1].axis('off')
-            axs[2].imshow(label)
-            axs[2].axis('off')
-            #save the final result
-            plt.savefig(f'/content/drive/MyDrive/MLDL_Project/AdaptSegNet/results/{i/2}.jpg') #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
+	#image
+	image = image[0].clone().detach()
+	image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
+	image = transforms.ToPILImage()(image.to(torch.uint8))
+	#prediction
+	predict = torch.tensor(predict.copy(), dtype=torch.uint8)
+	predict = colorLabel(predict, palette) 
+	#label from np to Pil Image
+	label = torch.tensor(label.copy(), dtype=torch.uint8)
+	label = colorLabel(label, palette)
+	#create the figure
+	fig, axs = plt.subplots(1,3, figsize=(10,5))
+	axs[0].imshow(image)
+	axs[0].axis('off')
+	axs[1].imshow(predict)
+	axs[1].axis('off')
+	axs[2].imshow(label)
+	axs[2].axis('off')
+	#save the final result
+	plt.savefig(path_to_save) #@ Salvare in png | che significa i/2 ? | le immagini vengono sovrascritte ad ogni epoch? | Aggiungere la directory negli argomenti
 
-
+def get_index(i):
+	"""
+	Create the index to save the example
+	"""
+	return "0"*(3-len(str(i)))+str(i)
 
 #------------------------------------------------------------
 #------------------CUSTOM TRANSFORMS-------------------------

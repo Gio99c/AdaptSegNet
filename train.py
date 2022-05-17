@@ -19,7 +19,7 @@ import torch
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 import numpy as np
-from utils import save_images, parameter_flops_count, colorLabel, poly_lr_scheduler
+from utils import get_index, save_images, parameter_flops_count, colorLabel, poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, per_class_iu
 from loss import DiceLoss, flatten
 import torch.cuda.amp as amp
@@ -70,7 +70,8 @@ OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
 FLOPS = False
 LIGHT = True
-SAVE = True
+SAVE_IMAGES = True
+SAVE_IMAGES_STEP = 10
 
 TENSORBOARD_LOGDIR = 'run'
 CHECKPOINT_STEP = 5
@@ -140,11 +141,14 @@ def get_arguments(params):
     parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
     parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of parameter and the number of flops')
     parser.add_argument('--light', type=bool, default=LIGHT, help='Perform the training with the lightweight discriminator')
-    parser.add_argument('--save_images', type=bool, default=SAVE, help='Save image samples')
+    
 
     parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
     parser.add_argument('--checkpoint_step', type=int, default=CHECKPOINT_STEP, help='How often to save checkpoints (epochs)')
     parser.add_argument('--validation_step', type=int, default=VALIDATION_STEP, help='How often to perform validation (epochs)')
+    parser.add_argument('--save_images', type=bool, default=SAVE_IMAGES, help='Indicate if it is necessary saving examples during validation')
+    parser.add_argument('--save_images_step', type=bool, default=SAVE_IMAGES_STEP, help='How often save an image during validation')
+
     parser.add_argument('--save_model_path', type=str, default=SAVE_MODEL_PATH, help='path to save model')
     
     
@@ -284,7 +288,7 @@ def main(params):
     #--------------------------------------Train Launch---------------------------------------------------
     train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader)
 
-    val(args, model, valloader)
+    val(args, model, valloader, 'final')
 
 
 #------------------------------------------------------------------------------------------------------
@@ -303,6 +307,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
 
     time = datetime.datetime.now(tz=timezone("Europe/Rome")).strftime("%d%B_%H:%M")
     suffix = f"{time}_{args.context_path}_light={args.light}_batch={args.batch_size}_lr={args.learning_rate}_croptarget({args.input_size_target})_cropsource({args.input_size_source})"
+    args.save_model_path = args.save_model_path + suffix
     writer = SummaryWriter(f"{args.tensorboard_logdir}{suffix}")
     
     #Set the loss of G
@@ -466,25 +471,25 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
         writer.add_scalar('epoch/loss_epoch_train_D', float(loss_train_D_mean), epoch)
         print(f'Average loss_D for epoch {epoch}: {loss_train_D_mean}')
 
-        save_model_path = args.save_model_path + suffix
         if epoch % args.checkpoint_step == 0 and epoch != 0:
-            if not os.path.isdir(save_model_path):
-                os.mkdir(save_model_path)
-            torch.save(model.module.state_dict(), os.path.join(save_model_path, 'latest_model.pth'))
-            torch.save(discriminator.module.state_dict(), os.path.join(save_model_path, 'latest_discriminator.pth'))
+            if not os.path.isdir(args.save_model_path):
+                os.mkdir(args.save_model_path)
+            torch.save(model.module.state_dict(), os.path.join(args.save_model_path, 'latest_model.pth'))
+            torch.save(discriminator.module.state_dict(), os.path.join(args.save_model_path, 'latest_discriminator.pth'))
         
         if epoch % args.validation_step == 0 and epoch != 0:
-                precision, miou = val(args, model, valloader)
+                precision, miou = val(args, model, valloader, validation_run)
+                validation_run += 1
                 if miou > max_miou:
                     max_miou = miou
-                    os.makedirs(save_model_path, exist_ok=True)
+                    os.makedirs(args.save_model_path, exist_ok=True)
                     torch.save(model.module.state_dict(),
-                            os.path.join(save_model_path, 'best_model.pth'))
+                            os.path.join(args.save_model_path, 'best_model.pth'))
                 writer.add_scalar('epoch/precision_val', precision, epoch)
                 writer.add_scalar('epoch/miou val', miou, epoch)
 
 
-def val(args, model, dataloader):
+def val(args, model, dataloader, validation_run):
 
     print(f"{'#'*10} VALIDATION {'#' * 10}")
 
@@ -493,6 +498,7 @@ def val(args, model, dataloader):
     #prepare info_file to save examples
     info = json.load(open(args.data_target+"/"+args.info_file))
     palette = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
+    mean = torch.as_tensor(info["mean"]).cuda() 
 
     with torch.no_grad():
         model.eval() #set the model in the evaluation mode
@@ -523,11 +529,16 @@ def val(args, model, dataloader):
             # there is no need to transform the one-hot array to visual RGB array
             # predict = colour_code_segmentation(np.array(predict), label_info)
             # label = colour_code_segmentation(np.array(label), label_info)
-            precision_record.append(precision)
+            path_to_save= args.save_model_path+f"/val_results/{validation_run}"
+            print(path_to_save)
 
-            if args.save_images:
-                mean = torch.as_tensor(info["mean"]).cuda() 
-                save_images(i, mean, palette, image, predict, label) 
+            if args.save_images and i % args.save_images_step == 0 : 
+                index_image = get_index(int(i/args.save_images_step))
+                os.makedirs(path_to_save, exist_ok=True)
+                save_images(mean, palette, image, predict, label, 
+                path_to_save+"/"+index_image+".png") 
+            
+            precision_record.append(precision)
            
     
     precision = np.mean(precision_record)
