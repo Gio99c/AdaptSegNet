@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import torchvision
 import json
 
-from utils import Map, Map2, MeanSubtraction, ToNumpy, colorLabel
+from utils import Map, Map2, MeanSubtraction, ToNumpy, colorLabel, create_mask, one_hot
 
 
 
@@ -64,7 +64,7 @@ class GTA(VisionDataset):
         image = np.array(Image.open(image_path), dtype=np.float32)
         label = np.array(Image.open(label_path), dtype=np.float32)
         
-        image = MeanSubtraction(self.mean)(image)
+        #image = MeanSubtraction(self.mean)(image)
         label = Map(self.mapper)(label)
         
         if self.transforms:
@@ -80,6 +80,15 @@ class GTA(VisionDataset):
             label = transforms.Resize((720, 1280), interpolation=transforms.InterpolationMode.NEAREST)(label)
 
         return image, label[0]
+    
+    def get_labels(self):
+        print('getting labels')
+        labels = []
+        for i in range(self.__len__()):
+            print(i)
+            _, label = self.__getitem__(i)
+            labels.append(label)
+        return labels
 
 
 
@@ -89,25 +98,60 @@ if __name__ == "__main__":
     crop_height = 720
     composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True)])
     data = GTA(root=os.path.join(os.getcwd(),"data","GTA5"), images_folder="images", labels_folder="labels", list_path="train.txt", info_file="info.json") #transforms=composed 
-    image, label = data[5]
+    image, label = data[38]
+
+
+
     #print(image.size())
 
-    #info
+    # #info
     info = json.load(open(os.path.join(os.getcwd(),"data","GTA5","info.json")))
 
-    #Image
+    # # #Image
     image = transforms.ToPILImage()(image.to(torch.uint8))
     
-    #Label
+    # # #Label
     palette = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
-    label = colorLabel(label,palette)
 
-    fig, axs = plt.subplots(1,2, figsize=(10,5))
-    axs[0].imshow(image)
-    axs[0].axis('off')
-    axs[1].imshow(label)
-    axs[1].axis('off')
-    plt.show()
+    layer_0 = one_hot(label)[16]
+    layer_0 = colorLabel(layer_0, palette)
+
+    layer_0.show()
+
+    label = colorLabel(label,palette)
+    label.show()
+    image.show()
+    
+    
+
+
+    # #get_labels Test
+    # labels = data.get_labels()
+    # print(len(labels))
+    # label = colorLabel(labels[0], palette)
+
+    # fig, axs = plt.subplots(1,2, figsize=(10,5))
+    # axs[0].imshow(image)
+    # axs[0].axis('off')
+    # axs[1].imshow(label)
+    # axs[1].axis('off')
+
+    # plt.show()
+
+    mask = create_mask(data.get_labels())
+    layer_1 = mask[13]
+    layer_1 = torch.tensor(layer_1*255, dtype=torch.uint8)
+    layer_1 = transforms.ToPILImage()(layer_1)
+    layer_1.show()
+
+    # #check prob
+    # prob = torch.sum(mask, axis = -3)
+    # print(prob)
+    
+
+
+
+
 
 
     
