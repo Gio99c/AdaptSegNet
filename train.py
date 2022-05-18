@@ -1,7 +1,6 @@
 from calendar import EPOCH
 from contextvars import Context
 import json
-from pickle import FALSE
 import sys
 import datetime
 from pytz import timezone
@@ -19,7 +18,7 @@ import torch
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 import numpy as np
-from utils import create_mask, get_index, save_images, parameter_flops_count, colorLabel, poly_lr_scheduler
+from utils import get_index, save_images, parameter_flops_count, colorLabel, poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, per_class_iu
 from loss import DiceLoss, flatten
 import torch.cuda.amp as amp
@@ -70,7 +69,6 @@ OPTIMIZER = 'sgd'
 LOSS = 'crossentropy'
 FLOPS = False
 LIGHT = True
-WITH_MASK = False
 SAVE_IMAGES = True
 SAVE_IMAGES_STEP = 10
 
@@ -142,7 +140,6 @@ def get_arguments(params):
     parser.add_argument('--loss', type=str, default=LOSS, help='loss function, dice or crossentropy')
     parser.add_argument('--flops', type=bool, default=FLOPS, help='Display the number of parameter and the number of flops')
     parser.add_argument('--light', type=bool, default=LIGHT, help='Perform the training with the lightweight discriminator')
-    parser.add_argument('--with_mask', type=bool, default=WITH_MASK, help='Indicate if mask is needed')
     
 
     parser.add_argument('--tensorboard_logdir', type=str, default=TENSORBOARD_LOGDIR, help='Directory for the tensorboard writer')
@@ -230,8 +227,6 @@ def main(params):
                          info_file= args.info_file,
                          transforms= composed_source)
 
-    mask = create_mask(GTA5_dataset.get_labels())
-
     Cityscapes_dataset_train = Cityscapes(root= args.data_target,
                          images_folder= 'images',
                          labels_folder='labels',
@@ -290,7 +285,7 @@ def main(params):
 
 
     #--------------------------------------Train Launch---------------------------------------------------
-    train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader, mask)
+    train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader)
 
     val(args, model, valloader, 'final')
 
@@ -304,7 +299,7 @@ def main(params):
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------TRAIN-------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
-def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader, mask):
+def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader):
     validation_run = 0 
     
     scaler = amp.GradScaler() 
@@ -316,10 +311,7 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
     writer = SummaryWriter(f"{args.tensorboard_logdir}{suffix}")
     
     #Set the loss of G
-    if args.with_mask:
-        loss_func = torch.nn.NLLLoss(ignore_index=255)
-    else:
-        loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
+    loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
 
     #Set the loss of D
     bce_loss = torch.nn.BCEWithLogitsLoss()
@@ -375,19 +367,12 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             with amp.autocast():
                 output, output_sup1, output_sup2 = model(source_images) #final_output, output_x16down, output_(x32down*tail)
 
-                #if args.with_mask:
-                    #GOAL 1:
-                    #1) fare logsoftmax di output
-                    #2) fare log mask
-                    #3) sommare 1) e 2)
-
-                    #GOAL 2:
-                    #1) mask * 500 => p_ij in [500]
-                    #2) costruire v = [...], v_k = sum_ij p_ij fissato k
-                    #3) costruire w = [...], w_k = v_k / (h*w*500)
-                    #4) passare w a NLLLoss
-
-                    #passare il risultato a NLLLoss => modificare loss_func
+                #Qui andrebbero le interpolazioni - al momento comemmentati
+                #output = interp_source(output)
+                #output_sup1 = interp_source(output_sup1)
+                #output_sup2 = interp_source(output_sup2)
+                #source_labels = interp_source(source_labels)
+                #--------------------------------
 
                 loss1 = loss_func(output, source_labels)                #principal loss
                 loss2 = loss_func(output_sup1, source_labels)           #loss with respect to output_x16down
@@ -403,6 +388,11 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
 
             with amp.autocast():
                 output_target, _, _ = model(target_images) #Al discriminatore va passato solo output
+
+                #Qui andrebbero le interpolazioni - al momento comemmentati
+                ##output_target = interp_source(output_target) # @Edoardo, stessa cosa qui
+                #output_target = interp_target(output_target)
+                #--------------------------------
 
                 D_out = discriminator(F.softmax(output_target))      
 
@@ -508,9 +498,7 @@ def val(args, model, dataloader, validation_run):
     #prepare info_file to save examples
     info = json.load(open(args.data_target+"/"+args.info_file))
     palette = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
-    mean = torch.as_tensor(info["mean"])
-    if torch.cuda.is_available() and args.use_gpu:
-        mean = mean.cuda() 
+    mean = torch.as_tensor(info["mean"]).cuda() 
 
     with torch.no_grad():
         model.eval() #set the model in the evaluation mode
@@ -525,12 +513,6 @@ def val(args, model, dataloader, validation_run):
 
             #get RGB predict image
             predict = model(image).squeeze() #remove all the dimension equal to one => For example, if input is of shape: (A×1×B×C×1×D) then the out tensor will be of shape: (A×B×C×D)
-            
-            #--------------------------------------------------------------------------
-            # Verificare che i layer di predict sono nello stesso ordine della maschera
-            # TODO
-            #---------------------------------------------------------------------------
-            
             predict = reverse_one_hot(predict) #from one_hot_encoding to class key?
             predict = np.array(predict.cpu()) #move predict to cpu and convert it into a numpy array
 
@@ -578,7 +560,7 @@ if __name__ == '__main__':
         '--validation_step', '7',
         '--num_epochs', '50',
         '--learning_rate', '2.5e-2',
-        '--data_target', './data/Cityscapes',
+        '--data_target', '/content/drive/MyDrive/MLDL_Project/AdaptSegNet/data/Cityscapes',
         '--data_source', '/content/drive/MyDrive/MLDL_Project/AdaptSegNet/data/GTA5',
         '--num_workers', '8',
         '--num_classes', '19',
@@ -590,38 +572,7 @@ if __name__ == '__main__':
         '--optimizer', 'sgd',
 
     ]
-
-    #main(params)
     
-    args = get_arguments(params)
-
-    model = BiSeNet(19, 'resnet101')
-
-
-    h, w = map(int, args.input_size_target.split(','))
-    input_size_target = (h, w)
-
-    composed_target = transforms.Compose([transforms.ToTensor(),                                                               
-                                transforms.RandomHorizontalFlip(p=0.5),                                             
-                                transforms.RandomCrop(input_size_target, pad_if_needed=True)])
-
-    Cityscapes_dataset_val = Cityscapes(root= args.data_target,
-                         images_folder= 'images',
-                         labels_folder='labels',
-                         train=False,
-                         info_file= args.info_file,
-                         transforms= composed_target
-    )
-
-    valloader = DataLoader(Cityscapes_dataset_val,
-                            batch_size=1,
-                            shuffle=False, 
-                            num_workers=args.num_workers,
-                            pin_memory=True)
-
-
-    val(args, model, valloader, 0)
-
-
+    main(params)
     
 

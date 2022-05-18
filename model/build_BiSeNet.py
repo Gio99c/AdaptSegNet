@@ -1,12 +1,5 @@
-import sys
-
-from matplotlib.pyplot import axis
-sys.path.insert(1, "./")
-
-from tkinter import Image
 import torch
 from torch import nn
-
 from model.build_contextpath import build_contextpath
 import warnings
 warnings.filterwarnings(action='ignore')
@@ -95,8 +88,6 @@ class FeatureFusionModule(torch.nn.Module):
         x = self.relu(x)
         x = self.conv2(x)
         x = self.sigmoid(x)
-
-       
 
         x = torch.mul(feature, x)
         x = torch.add(x, feature)
@@ -191,17 +182,8 @@ class BiSeNet(torch.nn.Module):
         # output of feature fusion module
         result = self.feature_fusion_module(sx, cx)
 
-        #qui result è descritto con probabilità
-        # img = result[0]
-        # print('Shape prob: ',img.shape)
-        # print('Somma prob pointwise: ', torch.sum(result[0], axis = 1))
-        # import numpy as np
-        # print('Unique fusion: ',np.unique(img[0].detach().numpy()))
-        # print(result)
-
         # upsampling
         result = torch.nn.functional.interpolate(result, scale_factor=8, mode='bilinear')
-
         result = self.conv(result)
 
         if self.training == True:
@@ -214,35 +196,19 @@ class BiSeNet(torch.nn.Module):
 if __name__ == '__main__':
     import os
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    model = BiSeNet(19, 'resnet101')
-    x = torch.rand(2, 3, 512, 1024)
-    record = model.parameters()
-
-    result, _, _ = model(x)
-    result = result[0]
-    print('Output finale:',result.shape)
-
-
-
+    model = BiSeNet(32, 'resnet18')
     # model = nn.DataParallel(model)
 
-    #model = model.cuda()
-    
-    # Imports PIL module 
-    from PIL import Image
-    from torchvision import transforms
-    
-    # open method used to open different extension image file
-    # im = Image.open(r"data/Cityscapes/images/zurich_000075_000019_leftImg8bit.png") 
-    # im = transforms.ToTensor()(im)
-    # im2 = Image.open((r"data/Cityscapes/images/zurich_000116_000019_leftImg8bit.png"))
-    # im2 = transforms.ToTensor()(im2)
-    # print(im.shape)
-    # x = torch.tensor([im.numpy(), im2.numpy()])
-    # result = model(x)
-    # print(result.shape)
-    
-    # This method will show image in any image viewer 
-    #im.show() 
+    model = model.cuda()
+    x = torch.rand(2, 3, 256, 256)
+    record = model.parameters()
+    # for key, params in model.named_parameters():
+    #     if 'bn' in key:
+    #         params.requires_grad = False
+    from utils import group_weight
+    # params_list = []
+    # for module in model.mul_lr:
+    #     params_list = group_weight(params_list, module, nn.BatchNorm2d, 10)
+    # params_list = group_weight(params_list, model.context_path, torch.nn.BatchNorm2d, 1)
 
     print(model.parameters())
