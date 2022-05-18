@@ -301,6 +301,7 @@ def main(params):
 #------------------------------------------TRAIN-------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
 def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, interp_target, trainloader, targetloader, valloader):
+    validation_run = 0 
     
     scaler = amp.GradScaler() 
     scaler_dis = amp.GradScaler()

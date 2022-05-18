@@ -1,3 +1,7 @@
+import sys
+sys.path.insert(1, "./")
+import os
+
 from turtle import color
 import torch
 import numpy as np
@@ -9,13 +13,13 @@ import matplotlib.pyplot as plt
 import torchvision
 import json
 
-from utils import Map, Map2, MeanSubtraction, ToNumpy
+from utils import Map, Map2, MeanSubtraction, ToNumpy, colorLabel
 
 
 
 
 class GTA(VisionDataset):
-    def __init__(self, root, image_folder, labels_folder, list_path,info_file=None, transforms=transforms.ToTensor()):
+    def __init__(self, root, images_folder, labels_folder, list_path, info_file=None, transforms=[]):
         """
         Inputs:
             root: string, path of the root folder where images and labels are stored
@@ -30,23 +34,20 @@ class GTA(VisionDataset):
         super().__init__(root, transforms)
 
         self.list_path = list_path
-        info = json.load(open(f"{root}/{info_file}"))         
+        info = json.load(open(os.path.join(self.root, info_file)))         
         self.mapper = dict(info["label2train"])
         self.mean = info["mean"]
-        images_folder_path = Path(self.root) / image_folder     # absolute path of the folder containing the images
-        labels_folder_path = Path(self.root) / labels_folder    # absolute path of the folder containing the labels
+        self.images_folder_path = Path(os.path.join(self.root, images_folder))     # absolute path of the folder containing the images
+        self.labels_folder_path = Path(os.path.join(self.root, labels_folder))     # absolute path of the folder containing the labels
         
-
         #Retrive the file names of the images and labels contained in the indicated folders
-        image_name_list = np.array(sorted(images_folder_path.glob("*")))
-        labels_list = np.array(sorted(labels_folder_path.glob("*")))
-
+        image_name_list = np.array(sorted(os.listdir(self.images_folder_path)))
+        labels_list = np.array(sorted(os.listdir(self.labels_folder_path)))
 
         #Prepare lists of data and labels
-        name_samples = list(np.loadtxt(f"{root}/{self.list_path}", dtype="unicode")) # creates the list of the images names for the train/validation according to list_path
-        self.images = [img for img in image_name_list if str(img).split("/")[-1] in name_samples]    # creates the list of images names filtered according to name_samples
-        self.labels = [img for img in labels_list if str(img).split("/")[-1] in name_samples]  # creates the list of label image names filtered according to name_samples
-        
+        name_samples = list(np.loadtxt(os.path.join(self.root, self.list_path), dtype="unicode")) # creates the list of the images names for the train/validation according to list_path
+        self.images = [img for img in image_name_list if str(img) in name_samples]    # creates the list of images names filtered according to name_samples
+        self.labels = [img for img in labels_list if str(img) in name_samples]  # creates the list of label image names filtered according to name_samples
 
 
     def __len__(self):
@@ -55,9 +56,10 @@ class GTA(VisionDataset):
         """
         return len(self.images)
 
+
     def __getitem__(self, index):
-        image_path = self.images[index]
-        label_path = self.labels[index]
+        image_path = os.path.join(self.images_folder_path,self.images[index])
+        label_path = os.path.join(self.labels_folder_path,self.labels[index])
 
         image = np.array(Image.open(image_path), dtype=np.float32)
         label = np.array(Image.open(label_path), dtype=np.float32)
@@ -71,28 +73,42 @@ class GTA(VisionDataset):
             image = self.transforms(image)    # applies the transforms for the images
             torch.manual_seed(seed)
             label = self.transforms(label)    # applies the transforms for the labels
-        
+        else: 
+            image = transforms.ToTensor()(image)
+            image = transforms.Resize((720, 1280))(image) 
+            label = transforms.ToTensor()(label)
+            label = transforms.Resize((720, 1280), interpolation=transforms.InterpolationMode.NEAREST)(label)
+
         return image, label[0]
 
-def printImageLabel(image, label):
-    info = json.load(open("data/GTA5/info.json"))
-    mean = torch.as_tensor(info["mean"])
-    image = (image.permute(1, 2, 0) + mean).permute(2, 0, 1)
-    mapper = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
-    fig, axs = plt.subplots(1,2, figsize=(10,5))
-    composed = torchvision.transforms.Compose([ToNumpy(), Map2(mapper), transforms.ToTensor(), transforms.ToPILImage()])
-    axs[0].imshow(transforms.ToPILImage()(image.to(torch.uint8)))
-    axs[1].imshow(composed(label))
-    plt.show()
+
+
 
 if __name__ == "__main__":
     crop_width = 1280
     crop_height = 720
-    composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomAffine(0, scale=[0.75, 2.0]), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True), transforms.GaussianBlur(kernel_size=3)])
-    data = GTA("./data/GTA5", "images/", "labels/", 'train.txt',info_file="info.json", transforms=composed)
+    composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True)])
+    data = GTA(root=os.path.join(os.getcwd(),"data","GTA5"), images_folder="images", labels_folder="labels", list_path="train.txt", info_file="info.json") #transforms=composed 
     image, label = data[5]
+    #print(image.size())
 
+    #info
+    info = json.load(open(os.path.join(os.getcwd(),"data","GTA5","info.json")))
+
+    #Image
     image = transforms.ToPILImage()(image.to(torch.uint8))
-    label = transforms.ToPILImage()(label.to(torch.uint8))
+    
+    #Label
+    palette = {i if i!=19 else 255:info["palette"][i] for i in range(20)}
+    label = colorLabel(label,palette)
 
-    printImageLabel(image,label)
+    fig, axs = plt.subplots(1,2, figsize=(10,5))
+    axs[0].imshow(image)
+    axs[0].axis('off')
+    axs[1].imshow(label)
+    axs[1].axis('off')
+    plt.show()
+
+
+    
+    #transforms.ToPILImage()(image_label.to(torch.uint8)).show()
