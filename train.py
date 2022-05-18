@@ -6,7 +6,6 @@ import datetime
 from pytz import timezone
 from turtle import color
 from xml.dom import VALIDATION_ERR
-sys.path.insert(1, "./")
 
 import argparse
 from cProfile import label
@@ -223,13 +222,13 @@ def main(params):
                                 transforms.RandomCrop(input_size_target, pad_if_needed=True)])
 
     GTA5_dataset = GTA(root= args.data_source, 
-                         image_folder= 'images', labels_folder= 'labels',
+                         images_folder= 'images', labels_folder= 'labels',
                          list_path= args.data_list_path_source,
                          info_file= args.info_file,
                          transforms= composed_source)
 
     Cityscapes_dataset_train = Cityscapes(root= args.data_target,
-                         image_folder= 'images',
+                         images_folder= 'images',
                          labels_folder='labels',
                          train=True,
                          info_file= args.info_file,
@@ -237,7 +236,7 @@ def main(params):
     )
 
     Cityscapes_dataset_val = Cityscapes(root= args.data_target,
-                         image_folder= 'images',
+                         images_folder= 'images',
                          labels_folder='labels',
                          train=False,
                          info_file= args.info_file,
@@ -259,7 +258,7 @@ def main(params):
     
     valloader = DataLoader(Cityscapes_dataset_val,
                             batch_size=1,
-                            shuffle=True, 
+                            shuffle=False, 
                             num_workers=args.num_workers,
                             pin_memory=True)
 
@@ -531,7 +530,6 @@ def val(args, model, dataloader, validation_run):
             # predict = colour_code_segmentation(np.array(predict), label_info)
             # label = colour_code_segmentation(np.array(label), label_info)
             path_to_save= args.save_model_path+f"/val_results/{validation_run}"
-            print(path_to_save)
 
             if args.save_images and i % args.save_images_step == 0 : 
                 index_image = get_index(int(i/args.save_images_step))
