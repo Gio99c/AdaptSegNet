@@ -56,12 +56,12 @@ RANDOM_SEED = 1234
 
 NUM_CLASSES = 19
 LEARNING_RATE = 2.5e-4
-WEIGHT_DECAY = 0.0005 # Bisenet : 1e-4
+WEIGHT_DECAY = 0.0005 
 MOMENTUM = 0.9
 POWER = 0.9
 LEARNING_RATE_D = 1e-4
-LAMBDA_SEG = 0.1                #quali lambda servono? 
-LAMBDA_ADV_TARGET1 = 0.001      #prima era 0.0002 quali lambda servono? 
+LAMBDA_SEG = 0.1                
+LAMBDA_ADV_TARGET1 = 0.001      
 
 PRETRAINED_MODEL_PATH = None
 CONTEXT_PATH = "resnet101"
@@ -77,25 +77,7 @@ CHECKPOINT_STEP = 5
 VALIDATION_STEP = 15
 SAVE_MODEL_PATH = None
 
-#------------------------------------------------------------------------------------------------------
-#------------------------I seguenti parametri potrebbero non servire-----------------------------------
-#------------------------------------------------------------------------------------------------------
 
-NUM_STEPS = 250000       #An epoch consists of one full cycle through the training data. 
-                         #This is usually many steps. 
-                         #As an example, if you have 2,000 images and use a batch size of 10 an epoch consists of:
-                         #2,000 images / (10 images / step) = 200 steps.
-NUM_STEPS_STOP = 150000  # early stopping
-
-SAVE_NUM_IMAGES = 2
-SAVE_PRED_EVERY = 5000
-SNAPSHOT_DIR = './snapshots/'
-
-GAN = 'Vanilla'
-IGNORE_LABEL = 255 
-
-TARGET = 'cityscapes'
-SET = 'train'
 
 print("Import terminato")
 
@@ -162,8 +144,6 @@ def get_arguments(params):
 #------------------------------------------------------------------------------------------------------
 #-------------------------------------------MAIN-------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
-
-
 def main(params):
     """ Initialization and train launch """
     print(os.listdir())
@@ -265,16 +245,8 @@ def main(params):
         
 
     #Build Model Optimizer
-    if args.optimizer == 'rmsprop':
-        optimizer = torch.optim.RMSprop(model.parameters(), args.learning_rate)
-    elif args.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
-    elif args.optimizer == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), args.learning_rate)
-    else:  # rmsprop
-        print('not supported optimizer \n')
-        return None
-    
+    optimizer = torch.optim.SGD(model.parameters(), args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
+
     #Build Discriminator Optimizer
     dis_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.learning_rate_D, betas=(0.9, 0.99))
 
@@ -365,19 +337,13 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
             dis_optimizer.zero_grad() 
 
             with amp.autocast():
-                output, output_sup1, output_sup2 = model(source_images) #final_output, output_x16down, output_(x32down*tail)
+                output, output_sup1, output_sup2 = model(source_images) 
 
-                #Qui andrebbero le interpolazioni - al momento comemmentati
-                #output = interp_source(output)
-                #output_sup1 = interp_source(output_sup1)
-                #output_sup2 = interp_source(output_sup2)
-                #source_labels = interp_source(source_labels)
-                #--------------------------------
 
-                loss1 = loss_func(output, source_labels)                #principal loss
-                loss2 = loss_func(output_sup1, source_labels)           #loss with respect to output_x16down
-                loss3 = loss_func(output_sup2, source_labels)           #loss with respect to output_(x32down*tail)
-                loss_seg = loss1+loss2+loss3                            # The total loss is the sum of three terms (Equazione 2 sezione 3.3 del paper)
+                loss1 = loss_func(output, source_labels)               
+                loss2 = loss_func(output_sup1, source_labels)           
+                loss3 = loss_func(output_sup2, source_labels)           
+                loss_seg = loss1+loss2+loss3                            
 
             scaler.scale(loss_seg).backward() 
 
@@ -387,21 +353,13 @@ def train(args, model, discriminator, optimizer, dis_optimizer, interp_source, i
                 target_images = target_images.cuda()
 
             with amp.autocast():
-                output_target, _, _ = model(target_images) #Al discriminatore va passato solo output
-
-                #Qui andrebbero le interpolazioni - al momento comemmentati
-                ##output_target = interp_source(output_target) # @Edoardo, stessa cosa qui
-                #output_target = interp_target(output_target)
-                #--------------------------------
+                output_target, _, _ = model(target_images) 
 
                 D_out = discriminator(F.softmax(output_target))      
 
                 loss_adv_target = bce_loss(D_out,
-                                       torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda()) #Calcola la loss del D_out 
-                                                                                                        #rispetto ad un tensore di source_label (quindi di 0) delle stesse dimensioni di D_out 
-                                                                                                        #NB source_label != source_labels, source_label = 0 etichetta per con cui D distingue source e target
-                                                                                                        #                                  source_labels = labels del batch di immagini provenienti da GTA      
-
+                                       torch.FloatTensor(D_out.data.size()).fill_(source_label).cuda()) 
+                                                                                                                                                                                                                
                 loss_adv = args.lambda_adv_target1 * loss_adv_target 
             
             scaler_dis.scale(loss_adv).backward()
@@ -501,34 +459,30 @@ def val(args, model, dataloader, validation_run):
     mean = torch.as_tensor(info["mean"]).cuda() 
 
     with torch.no_grad():
-        model.eval() #set the model in the evaluation mode
+        #Model to evaluation mode
+        model.eval() 
         precision_record = []
-        hist = np.zeros((args.num_classes, args.num_classes)) #create a square arrey with side num_classes
-        for i, (image, label) in enumerate(tqdm(dataloader)): #get a batch of data and the respective label at each iteration
-            label = label.type(torch.LongTensor) #set the type of the label to long
+        hist = np.zeros((args.num_classes, args.num_classes)) 
+        for i, (image, label) in enumerate(tqdm(dataloader)): 
+            label = label.type(torch.LongTensor) 
             label = label.long()
             if torch.cuda.is_available() and args.use_gpu:
                 image = image.cuda()
                 label = label.cuda()
 
             #get RGB predict image
-            predict = model(image).squeeze() #remove all the dimension equal to one => For example, if input is of shape: (A×1×B×C×1×D) then the out tensor will be of shape: (A×B×C×D)
-            predict = reverse_one_hot(predict) #from one_hot_encoding to class key?
-            predict = np.array(predict.cpu()) #move predict to cpu and convert it into a numpy array
+            predict = model(image).squeeze() 
+            predict = reverse_one_hot(predict) 
+            predict = np.array(predict.cpu()) 
 
             #get RGB label image
             label = label.squeeze()
-            if args.loss == 'dice':#check what loss is being used
-                label = reverse_one_hot(label)
             label = np.array(label.cpu())
 
             #compute per pixel accuracy
-            precision = compute_global_accuracy(predict, label) #accuracy of the prediction
+            precision = compute_global_accuracy(predict, label) 
             hist += fast_hist(label.flatten(), predict.flatten(), args.num_classes) 
             
-            # there is no need to transform the one-hot array to visual RGB array
-            # predict = colour_code_segmentation(np.array(predict), label_info)
-            # label = colour_code_segmentation(np.array(label), label_info)
             path_to_save= args.save_model_path+f"/val_results/{validation_run}"
 
             if args.save_images and i % args.save_images_step == 0 : 
@@ -541,7 +495,7 @@ def val(args, model, dataloader, validation_run):
            
     
     precision = np.mean(precision_record)
-    miou_list = per_class_iu(hist) #come funziona questo metodo?
+    miou_list = per_class_iu(hist)
     miou = np.mean(miou_list)
 
     print('precision per pixel for test: %.3f' % precision)

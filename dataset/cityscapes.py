@@ -76,7 +76,7 @@ class Cityscapes(VisionDataset):
             image = self.transforms(image)    # applies the transforms for the images
             torch.manual_seed(seed)
             label = self.transforms(label)    # applies the transforms for the labels
-        else: #FA IL RESIZE SE NON SIAMO IN TRAIN? NON PER FORZA RANDOM CROP
+        else: 
             image = transforms.ToTensor()(image)
             image = transforms.Resize((512, 1024))(image) 
             label = transforms.ToTensor()(label)
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     composed = torchvision.transforms.Compose([transforms.ToTensor(), transforms.RandomHorizontalFlip(p=0.5), transforms.RandomCrop((crop_height, crop_width), pad_if_needed=True)])
     data = Cityscapes(root=os.path.join(os.getcwd(),"data","Cityscapes"), images_folder="images", labels_folder="labels", train=True, info_file="info.json") #transforms=composed
     image, label = data[5]
-    #print(image.size()) to see if resize work
+
     print(os.getcwd())
     #info
     info = json.load(open(os.path.join(os.getcwd(),"data","Cityscapes","info.json")))
@@ -113,8 +113,7 @@ if __name__ == "__main__":
     plt.show()
 
 
-    
-    #transforms.ToPILImage()(image_label.to(torch.uint8)).show()
+
 
 
 
